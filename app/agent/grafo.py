@@ -31,6 +31,7 @@ import uuid
 from datetime import date
 
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
@@ -50,6 +51,20 @@ from app.ops import auditoria
 log = logging.getLogger(__name__)
 
 NOMBRE_TRAZA = "agente_gimnasio"
+# Tipos propios que se guardan en el checkpoint mientras una propuesta espera la confirmación
+_TIPOS_CHECKPOINT = [
+    ("app.auth", "Usuario"), ("app.agent.estado", "Clasificacion"), ("app.rag.buscador", "Fragmento"),
+    *[("app.ops.modelos", n) for n in ("AltaSocio", "ModificacionSocio", "CambiosSocio", "ReferenciaSocio",
+                                       "ContactoEmergencia", "Suspension", "Reactivacion", "Baja", "FueraDeCatalogo",
+                                       "Aviso", "SocioAfectado", "PropuestaCambio", "ResultadoValidacion",
+                                       "ResultadoEjecucion")],
+]
+_CUOTA_AGOTADA = {
+    "es": "Se alcanzó el límite diario gratuito del modelo de lenguaje, así que por ahora no puedo responder. "
+          "Volvé a intentarlo más tarde (el límite se renueva todos los días).",
+    "en": "The language model's free daily limit was reached, so I can't answer right now. "
+          "Please try again later (the limit resets every day).",
+}
 _ERROR_INTERNO = {
     "es": "Tuve un problema interno y no pude responder. Por favor, volvé a intentarlo en unos segundos.",
     "en": "I ran into an internal problem and couldn't answer. Please try again in a few seconds.",
@@ -86,7 +101,9 @@ def construir_grafo(checkpointer=None):
     g.add_conditional_edges("confirmar", ruta_despues_de_confirmar, ["ejecutar_operacion", "responder_operacion"])
     g.add_edge("ejecutar_operacion", "responder_operacion")
     g.add_edge("responder_operacion", END)
-    return g.compile(checkpointer=checkpointer if checkpointer is not None else MemorySaver())
+    if checkpointer is None:
+        checkpointer = MemorySaver(serde=JsonPlusSerializer(allowed_msgpack_modules=_TIPOS_CHECKPOINT))
+    return g.compile(checkpointer=checkpointer)
 
 
 _grafo = None
@@ -164,8 +181,27 @@ def _armar_respuesta(grafo, usuario: Usuario, thread_id: str, run_id: uuid.UUID,
     return respuesta
 
 
-def _respuesta_error(usuario: Usuario, thread_id: str, run_id: uuid.UUID, idioma: str, t0: float) -> RespuestaAgente:
-    return RespuestaAgente(texto=_ERROR_INTERNO[idioma], ruta="error", idioma=idioma, thread_id=thread_id,
+def _es_cuota(error: BaseException) -> bool:
+    from app.llm import CuotaDiariaAgotada
+
+    while error is not None:
+        if isinstance(error, CuotaDiariaAgotada):
+            return True
+        error = error.__cause__ or error.__context__
+    return False
+
+
+def _registrar_error(error: BaseException, contexto: str) -> None:
+    if _es_cuota(error):
+        log.warning("%s: se agotó la cuota diaria gratuita de Gemini", contexto)
+    else:
+        log.exception(contexto)
+
+
+def _respuesta_error(usuario: Usuario, thread_id: str, run_id: uuid.UUID, idioma: str, t0: float,
+                     error: BaseException | None = None) -> RespuestaAgente:
+    textos = _CUOTA_AGOTADA if error is not None and _es_cuota(error) else _ERROR_INTERNO
+    return RespuestaAgente(texto=textos[idioma], ruta="error", idioma=idioma, thread_id=thread_id,
                            trace_id=str(run_id), duracion_seg=round(time.perf_counter() - t0, 2), error=True)
 
 
@@ -184,10 +220,10 @@ def responder(usuario: Usuario, mensaje: str, hoy: date | None = None) -> Respue
     }
     try:
         salida = grafo.invoke(inicial, _config(usuario, thread_id, run_id))
-    except Exception:  # noqa: BLE001
-        log.exception("Error procesando el mensaje")
+    except Exception as e:  # noqa: BLE001
+        _registrar_error(e, "Error procesando el mensaje")
         idioma = "en" if mensaje.isascii() and " the " in f" {mensaje.lower()} " else "es"
-        return _respuesta_error(usuario, thread_id, run_id, idioma, t0)
+        return _respuesta_error(usuario, thread_id, run_id, idioma, t0, e)
     return _armar_respuesta(grafo, usuario, thread_id, run_id, salida, t0)
 
 
@@ -218,9 +254,9 @@ def reanudar(usuario: Usuario, thread_id: str, decision: str) -> RespuestaAgente
     try:
         salida = grafo.invoke(Command(resume={"decision": decision}, update={"trace_id": str(run_id)}),
                               _config(usuario, thread_id, run_id))
-    except Exception:  # noqa: BLE001
-        log.exception("Error reanudando la propuesta")
-        return _respuesta_error(usuario, thread_id, run_id, estado.values["clasificacion"].idioma, t0)
+    except Exception as e:  # noqa: BLE001
+        _registrar_error(e, "Error reanudando la propuesta")
+        return _respuesta_error(usuario, thread_id, run_id, estado.values["clasificacion"].idioma, t0, e)
     return _armar_respuesta(grafo, usuario, thread_id, run_id, salida, t0)
 
 

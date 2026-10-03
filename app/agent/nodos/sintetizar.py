@@ -27,7 +27,8 @@ _ERROR_DATOS = {
 }
 _ETIQUETA_FUENTE = {"es": "Fuente", "en": "Source"}
 _BASE = {"es": "base de datos", "en": "database"}
-_RE_CITA = re.compile(r"\[(DOC-\d{2})\s+(§[^,\]]+?)(?:,\s*p\.\s*\d+)?\]")
+_RE_CORCHETE = re.compile(r"\[([^\]]*DOC-\d{2}[^\]]*)\]")
+_RE_CITA = re.compile(r"(DOC-\d{2})\s+(§[\wÁÉÍÓÚáéíóúñ]+)")
 
 
 def _texto(contenido) -> str:
@@ -75,7 +76,8 @@ def fuentes_citadas(texto: str, fragmentos: list[Fragmento]) -> list[str]:
     """Fuentes ``DOC-0X §N`` citadas en el texto que corresponden a fragmentos recuperados (§8.4)."""
     disponibles = {f.fuente for f in fragmentos}
     citadas = []
-    for doc, seccion in _RE_CITA.findall(texto):
+    pares = [par for corchete in _RE_CORCHETE.findall(texto) for par in _RE_CITA.findall(corchete)]
+    for doc, seccion in pares:
         fuente = f"{doc} {seccion.strip()}"
         if fuente in disponibles and fuente not in citadas:
             citadas.append(fuente)

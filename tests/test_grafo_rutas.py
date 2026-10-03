@@ -266,3 +266,23 @@ def test_error_interno_mensaje_comprensible(entorno):
     modelos.rapido = Roto()
     r = modulo_grafo.responder(SOCIO, "hola", HOY)
     assert r.error and "boom" not in r.texto
+
+
+def test_cuota_diaria_agotada_mensaje_claro(entorno):
+    from app.llm import CuotaDiariaAgotada
+
+    class SinCuota(LLMFalso):
+        def with_structured_output(self, esquema):
+            raise CuotaDiariaAgotada("sin cuota")
+
+    modelos.rapido = SinCuota()
+    r = modulo_grafo.responder(SOCIO, "hola", HOY)
+    assert r.error and "límite diario" in r.texto
+
+
+def test_varias_citas_en_un_corchete():
+    from app.agent.nodos.sintetizar import fuentes_citadas
+
+    fr = [Fragmento(doc_id="DOC-04", seccion="9. Preguntas frecuentes — x", pagina=4, texto="t"),
+          Fragmento(doc_id="DOC-04", seccion="1. Apto médico", pagina=1, texto="t")]
+    assert fuentes_citadas("Dura 12 meses [DOC-04 §9, p. 4; DOC-04 §1, p. 1].", fr) == ["DOC-04 §9", "DOC-04 §1"]

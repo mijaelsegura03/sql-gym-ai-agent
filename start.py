@@ -186,7 +186,7 @@ def paso_config() -> None:
 def paso_api_keys() -> None:
     with Paso(4, "Verificando las API keys") as p:
         valores = leer_env()
-        interactiva = sys.stdin.isatty()
+        interactiva = sys.stdin.isatty() and sys.stdout.isatty()
         if not valores.get("GOOGLE_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
             if not interactiva:
                 raise PasoError("Falta GOOGLE_API_KEY en .env.",

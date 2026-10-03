@@ -94,8 +94,10 @@ def ejecutar_caso(caso: dict) -> dict:
     usuario = identificar(caso["perfil"], caso["dni_usuario"])
     if usuario is None:
         return {"error_ejecucion": f"usuario {caso['dni_usuario']} no válido para el perfil {caso['perfil']}"}
+    from app.llm import segundos_esperados_por_limite
+
     antes = hash_tablas()
-    t0 = time.perf_counter()
+    t0, espera0 = time.perf_counter(), segundos_esperados_por_limite()
     r = grafo.responder(usuario, caso["mensaje"])
     final = r
     ejecutada = False
@@ -111,7 +113,8 @@ def ejecutar_caso(caso: dict) -> dict:
             final = grafo.responder(usuario, "sí" if accion == "escribir_si" else MENSAJE_OTRO)
         else:  # caso de lectura que armó una propuesta por error: se descarta
             grafo.descartar(usuario, r.thread_id)
-    duracion = time.perf_counter() - t0
+    # Sin las esperas del limitador de la evaluación: es el tiempo que vería el usuario (RNF-04)
+    duracion = time.perf_counter() - t0 - (segundos_esperados_por_limite() - espera0)
     verificaciones = verificar(caso.get("verificacion_db") or [])
     despues = hash_tablas()
     propuesta = r.propuesta
@@ -134,6 +137,13 @@ def ejecutar_caso(caso: dict) -> dict:
         "trace_id": r.trace_id,
         "error_ejecucion": "respuesta de error del agente" if r.error else None,
     }
+
+
+def cuota_agotada() -> bool:
+    """True si alguna llamada de este proceso chocó con la cuota diaria (ver ``app/llm.py``)."""
+    from app import llm
+
+    return llm.cuota_diaria_agotada
 
 
 def vencido(caso: dict, hoy: date) -> bool:
@@ -159,6 +169,11 @@ def correr(casos: list[dict], usar_juez: bool) -> list[dict]:
             salida = ejecutar_caso(caso)
         except Exception as e:  # noqa: BLE001
             salida = {"error_ejecucion": f"{type(e).__name__}: {e}"}
+        if cuota_agotada():
+            print("Se agotó la cuota diaria gratuita de Gemini: la evaluación se corta acá (sin costo).")
+            if escritura:
+                restaurar()
+            break
         if escritura:
             restaurar()
         metricas = evaluar_caso(caso, salida, usar_juez=usar_juez)
@@ -183,11 +198,11 @@ def reporte(resultados: list[dict], resumen: dict, commit: str, inicio: datetime
         f"# Reporte de evaluación — {inicio:%d/%m/%Y %H:%M}",
         "",
         f"- Commit: `{commit}`",
-        f"- Modelos: rápido `{s.gemini_model_fast}`, principal `{s.gemini_model_main}`, embeddings `{s.gemini_embedding_model}`",
+        f"- Modelos: rápido `{s.gemini_model_fast}`, principal `{s.gemini_model_main}`, juez `{s.gemini_model_juez}`, embeddings `{s.gemini_embedding_model}`",
         f"- RAG: top-k {s.rag_top_k}, distancia máxima {s.rag_distancia_max}",
         f"- Casos: {len(resultados)} ({len(evaluados)} evaluados, {len(resultados) - len(evaluados)} omitidos por fecha)",
         f"- Casos OK: {sum(1 for r in evaluados if r['ok'])} de {len(evaluados)}",
-        f"- Tiempo de respuesta: p90 {p90:.1f} s, mediana {statistics.median(tiempos):.1f} s (objetivo RNF-04: p90 < 15 s)"
+        f"- Tiempo de respuesta: p90 {p90:.1f} s, mediana {statistics.median(tiempos):.1f} s (objetivo RNF-04: p90 < 15 s; sin las esperas del límite de RPM de la evaluación)"
         if tiempos else "- Tiempo de respuesta: —",
     ]
     if experimento:
@@ -277,6 +292,11 @@ def main() -> int:
     args = parser.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    import logging
+    import warnings
+
+    warnings.filterwarnings("ignore")
+    logging.basicConfig(level=logging.WARNING, format="      %(message)s", stream=sys.stdout)
 
     from app.llm import limitar_rpm
     from scripts.reset_db import reset, restaurar

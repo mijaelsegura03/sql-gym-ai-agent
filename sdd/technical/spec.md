@@ -2,7 +2,7 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 0.4 |
+| Versión | 0.5 |
 | Estado | Implementado (ajustes de implementación registrados en el historial) |
 | Fecha | 2026-10-03 |
 | Spec funcional de referencia | `sdd/functional/spec.md` v0.4 |
@@ -39,13 +39,16 @@ Verificado en la documentación de Google el 03/10/2026 (ai.google.dev, páginas
 
 | Variable | Valor por defecto | Uso | Plan gratuito |
 |---|---|---|---|
-| `GEMINI_MODEL_FAST` | `gemini-3.5-flash-lite` | Nodo `clasificar` | Sí |
-| `GEMINI_MODEL_MAIN` | `gemini-3.8-flash` | `generar_sql`, `extraer_operacion`, `sintetizar` y juez de la evaluación | Sí |
+| `GEMINI_MODEL_FAST` | `gemini-3.1-flash-lite` | Nodo `clasificar` | Sí (15 RPM, 500 RPD) |
+| `GEMINI_MODEL_MAIN` | `gemini-3.5-flash-lite` | `generar_sql`, `extraer_operacion` y `sintetizar` | Sí (15 RPM, 500 RPD) |
+| `GEMINI_MODEL_JUEZ` | `gemini-3.1-flash-lite` | Juez de la evaluación | Sí (15 RPM, 500 RPD) |
 | `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | Indexación y búsqueda | Sí |
 
-- **Límites del plan gratuito:** Google no los publica en la documentación; se ven en AI Studio (`aistudio.google.com/rate-limit`). Por eso todo llamado al LLM tiene reintentos con *backoff* exponencial ante el error 429, y la evaluación tiene un límite de requests por minuto configurable (`EVAL_RPM`).
+- **Límites del plan gratuito:** Google no los publica en la documentación; se ven en AI Studio (`aistudio.google.com/rate-limit`). Relevados el 03/10/2026 para la key del proyecto: los modelos *flash* (`gemini-3.8-flash`, `3.7`, `3.6`, `3.5`, `2.5`) tienen **5 RPM y 20 RPD**; `gemini-3.5-flash-lite` y `gemini-3.1-flash-lite`, **15 RPM y 500 RPD**. Con 20 requests por día el modelo principal original (`gemini-3.8-flash`) no alcanza ni para una evaluación (~180 llamadas al principal), así que se eligieron los dos *lite* de 500 RPD y se reparten los roles entre ellos (la cuota es por modelo).
+- **Sin costo:** el proyecto de la key no tiene facturación (plan *Free*): al superar un límite, Gemini devuelve 429 y no cobra. Todo llamado tiene reintentos con *backoff* exponencial ante 429 por minuto y ante 500/503/504 (saturación de Google, frecuente en estos modelos); el 429 por **límite diario** (`…PerDay…`) no se reintenta: corta con `CuotaDiariaAgotada`, la evaluación se detiene y la interfaz muestra un mensaje claro. La evaluación limita los requests por minuto con `EVAL_RPM` (12).
+- **Razonamiento:** el modelo rápido usa `thinking_budget=0` (`GEMINI_THINKING_FAST`), porque clasificar no lo necesita. `gemini-3.5-flash-lite` rechaza `thinking_budget=0` (400 `INVALID_ARGUMENT`) y con un presupuesto bajo no cambia la latencia, así que el principal queda con su valor por defecto.
 - **Uso de los datos:** en el plan gratuito, Google puede usar el contenido para mejorar sus productos. Se acepta porque los datos son sintéticos (S-04).
-- **Parámetros:** `temperature=0` en todos los nodos, salvo `responder_directo` (`0.3`).
+- **Parámetros:** `temperature=0` en todos los nodos (los modelos 3.x *lite* usan valores de muestreo fijos e ignoran la temperatura). Timeout de 30 s por llamada, para que una llamada colgada se reintente pronto.
 
 ---
 
@@ -757,8 +760,10 @@ que el arranque normal tarda lo que tardan el contenedor y la carga de datos.
 
 ```
 GOOGLE_API_KEY=             # start.py la pide la primera vez
-GEMINI_MODEL_FAST=gemini-3.5-flash-lite
-GEMINI_MODEL_MAIN=gemini-3.8-flash
+GEMINI_MODEL_FAST=gemini-3.1-flash-lite
+GEMINI_MODEL_MAIN=gemini-3.5-flash-lite
+GEMINI_MODEL_JUEZ=gemini-3.1-flash-lite
+GEMINI_THINKING_FAST=0
 GEMINI_EMBEDDING_MODEL=gemini-embedding-001
 
 POSTGRES_USER=postgres
@@ -772,14 +777,14 @@ DB_PASS_ESCRITOR=           # se genera si está vacío
 
 CHROMA_DIR=.chroma
 RAG_TOP_K=5
-RAG_DISTANCIA_MAX=0.6
+RAG_DISTANCIA_MAX=0.45
 
 LANGSMITH_TRACING=true
 LANGSMITH_API_KEY=          # opcional: vacía = sin trazas
 LANGSMITH_PROJECT=gimnasio-agente
 
 PSEUDONIMO_SECRET=          # se genera si está vacío
-EVAL_RPM=10
+EVAL_RPM=12
 ```
 
 ---
@@ -847,9 +852,9 @@ Los tests que requieren Docker se marcan con `@pytest.mark.db`.
 | ID | Pregunta | Decisión | Estado |
 |---|---|---|---|
 | DT-01 | Fecha base de los datos fijos | `2026-10-16` (día de la entrega). Los eventos quedan entre agosto y el 16/10, y las sesiones de "la próxima semana" llegan al 23/10 (primer coloquio). Mientras se desarrolla antes de esa fecha, hay datos posteriores a la fecha real; es un efecto aceptado. | Cerrada |
-| DT-02 | ¿Qué DNI se usa en cada caso de evaluación y en las preguntas de ejemplo? | Se eligen de los datos cargados, un socio representativo de cada situación, y quedan documentados en `casos.yaml`. | Se resuelve al implementar |
+| DT-02 | ¿Qué DNI se usa en cada caso de evaluación y en las preguntas de ejemplo? | Se eligen de los datos cargados, un socio representativo de cada situación, y quedan documentados en el encabezado de `eval/casos.yaml` y en el README. | Cerrada |
 | DT-03 | En la **suspensión**, ¿qué membresías se cancelan? | La `activa`, la `congelada` y la `pendiente` con `fecha_fin >= hoy`. Un socio suspendido no puede usar ninguna. Se refleja en OP-03 del spec funcional (v0.4). | Cerrada |
-| DT-04 | Valor de `RAG_DISTANCIA_MAX` | Se calibra con los casos de documentos y de "no cubierto" en la primera corrida. | Se resuelve al implementar |
+| DT-04 | Valor de `RAG_DISTANCIA_MAX` | `0.45`. Con `gemini-embedding-001` las distancias coseno están muy juntas: el mejor fragmento relevante queda entre 0,18 y 0,25, pero otros fragmentos necesarios aparecen hasta 0,36 (la tabla de sanciones de DOC-01 §7 para "¿qué pasa si un socio presta su QR?"), y los de un tema no cubierto (mascotas, CA-24) arrancan en 0,27. El umbral no separa por sí solo: se deja permisivo (0,35 cortaba fragmentos necesarios) y `sintetizar` decide si los fragmentos cubren la pregunta (RF-11). | Cerrada |
 
 ---
 
@@ -861,3 +866,4 @@ Los tests que requieren Docker se marcan con `@pytest.mark.db`.
 | 0.2 | 2026-10-03 | Se cierran DT-01 (fecha base 16/10/2026) y DT-03 (la suspensión cancela las membresías activa, congelada y pendiente). |
 | 0.3 | 2026-10-03 | §10: arranque totalmente automatizado con `start.py` en la raíz (entorno virtual, `.env` con secretos generados, pedido de API keys, inicio de Docker, puerto libre, `--wait`, DNI de ejemplo y `--evaluar`). |
 | 0.4 | 2026-10-03 | Ajustes de implementación: extensión `unaccent` en el esquema `ext`, zona horaria fija en las conexiones y auditoría sin `RETURNING` (§4.3); función `socio_api.socio_sesion()` y columna `con_reemplazo` (§4.4); regla de datos para CA-58 (§4.6); claves extra del estado y de `RespuestaAgente` y funciones de entrada (§5.1, §5.6); `sintetizar` diferido y ruta conservada en el rechazo por permisos (§5.3); `CambiosSocio` en lugar de `dict` y avisos con plantillas es/en (§7.1); precisiones de sede y membresía pendiente (§7.2); runner de evaluación local con registro posterior en LangSmith y `EVAL_RPM` como límite de requests a Gemini (§9.3); tests adicionales (§12). |
+| 0.5 | 2026-10-03 | §1.1: modelos del plan gratuito según los límites relevados en AI Studio (los *flash* tienen 20 RPD; se pasa a `gemini-3.5-flash-lite` como principal y `gemini-3.1-flash-lite` como rápido y juez, 500 RPD cada uno), modelo juez separado, corte ante la cuota diaria, `thinking_budget=0` solo en el rápido y timeout de 30 s. Se cierran DT-02 y DT-04 (`RAG_DISTANCIA_MAX=0.45`). |

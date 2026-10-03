@@ -1,10 +1,10 @@
 {
   "proyecto": "sql-gym-ai-agent — Punto 3 de la consigna",
-  "version": "0.3",
+  "version": "0.4",
   "fecha": "2026-10-03",
   "specs": {
     "funcional": "sdd/functional/spec.md v0.4",
-    "tecnico": "sdd/technical/spec.md v0.4"
+    "tecnico": "sdd/technical/spec.md v0.5"
   },
   "convenciones": {
     "estado": "pendiente | en_curso | hecha | bloqueada",
@@ -316,7 +316,7 @@
       "estimacion": "L",
       "estado": "en_curso",
       "responsable": null,
-      "notas": "Implementado y probado por partes en Windows (fases A y B con la base). Falta la corrida completa desde un clon limpio con API key y la prueba en Linux o macOS."
+      "notas": "Probado en Windows (PowerShell/Git Bash): arranque completo en 12 s con --sin-ui, segunda ejecución sin reinstalar ni pedir keys, y puerto 5433 ocupado → usa 5434. Falta probarlo en Linux o macOS."
     },
     {
       "id": "T-08",
@@ -384,9 +384,9 @@
         "Ante un 429 simulado se reintenta con espera creciente y un máximo configurable"
       ],
       "estimacion": "S",
-      "estado": "en_curso",
+      "estado": "hecha",
       "responsable": null,
-      "notas": "Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
+      "notas": "Verificado con Gemini real. Modelos del plan gratuito según los límites relevados (spec técnico v0.5 §1.1). Reintentos ante 429/503/504 y corte inmediato ante la cuota diaria (tests/test_llm.py)."
     },
     {
       "id": "T-10",
@@ -539,9 +539,9 @@
         "test_ingesta.py verifica el chunking y los metadatos sin llamar a la API"
       ],
       "estimacion": "L",
-      "estado": "en_curso",
+      "estado": "hecha",
       "responsable": null,
-      "notas": "Extracción y chunking probados sin API (72 chunks, tabla de DOC-01 §4 intacta). Falta indexar con embeddings reales."
+      "notas": "72 chunks de los 4 PDFs indexados con gemini-embedding-001 en una sola llamada batch; la segunda ejecución no llama a la API."
     },
     {
       "id": "T-14",
@@ -579,9 +579,9 @@
         "start.py indexa solo si hace falta"
       ],
       "estimacion": "S",
-      "estado": "en_curso",
+      "estado": "hecha",
       "responsable": null,
-      "notas": "Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
+      "notas": "Verificado: DOC-04 primero para el apto, umbral calibrado en 0,45 (DT-04)."
     },
     {
       "id": "T-15",
@@ -772,9 +772,9 @@
         "Cada invocación usa un thread_id nuevo"
       ],
       "estimacion": "M",
-      "estado": "en_curso",
+      "estado": "hecha",
       "responsable": null,
-      "notas": "Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
+      "notas": "Verificado en la evaluación: ruteo 96,6 % (corrida completa) y 100 % tras los ajustes de prompts."
     },
     {
       "id": "T-19",
@@ -833,9 +833,9 @@
         "RespuestaAgente.sql es None para el perfil socio"
       ],
       "estimacion": "L",
-      "estado": "en_curso",
+      "estado": "hecha",
       "responsable": null,
-      "notas": "Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
+      "notas": "Verificado en la evaluación: exactitud de datos 100 %."
     },
     {
       "id": "T-20",
@@ -877,9 +877,9 @@
         "Las fuentes de la respuesta salen de los metadatos de los fragmentos, no de texto libre del LLM"
       ],
       "estimacion": "M",
-      "estado": "en_curso",
+      "estado": "hecha",
       "responsable": null,
-      "notas": "Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
+      "notas": "Verificado en la evaluación: fidelidad y corrección RAG 100 % tras los ajustes."
     },
     {
       "id": "T-21",
@@ -913,9 +913,9 @@
         "La traza muestra las dos herramientas ejecutadas en paralelo"
       ],
       "estimacion": "S",
-      "estado": "en_curso",
+      "estado": "hecha",
       "responsable": null,
-      "notas": "Fan-in con defer=True probado con LLM simulado (incluido el reintento de SQL). Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
+      "notas": "Verificado en la evaluación: CA-30 a CA-33 OK con las dos fuentes."
     },
     {
       "id": "T-22",
@@ -985,9 +985,9 @@
         "Si falta un dato, el LLM no lo inventa: la respuesta lista los faltantes (CA-63)"
       ],
       "estimacion": "L",
-      "estado": "en_curso",
+      "estado": "hecha",
       "responsable": null,
-      "notas": "Interrupt, confirmar, cancelar, descartar y 'sí' probados con LLM simulado y contra la base. Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
+      "notas": "Verificado en la evaluación: exactitud y validación de escritura 100 %, 0 escrituras sin confirmación."
     },
     {
       "id": "T-23",
@@ -1059,7 +1059,7 @@
       "estimacion": "S",
       "estado": "en_curso",
       "responsable": null,
-      "notas": "Metadata, tags, @traceable y trace_id implementados. Falta verificar en LangSmith (LANGSMITH_API_KEY)."
+      "notas": "Implementado (metadata, tags, @traceable, trace_id en auditoría). Falta verificarlo en LangSmith: no hay LANGSMITH_API_KEY."
     },
     {
       "id": "T-25",
@@ -1097,9 +1097,9 @@
         "Cerrar la sesión vuelve a la pantalla de ingreso y limpia el estado"
       ],
       "estimacion": "S",
-      "estado": "en_curso",
+      "estado": "hecha",
       "responsable": null,
-      "notas": "Ingreso, sesión y cierre probados con streamlit AppTest (CA-80, CA-81, CA-86). Falta abrirla con python start.py."
+      "notas": "Verificado con AppTest (CA-80, CA-81, CA-86) y levantando Streamlit (HTTP 200)."
     },
     {
       "id": "T-26",
@@ -1136,9 +1136,9 @@
         "Los errores del agente se muestran como mensaje comprensible, sin traceback"
       ],
       "estimacion": "M",
-      "estado": "en_curso",
+      "estado": "hecha",
       "responsable": null,
-      "notas": "Chat, detalle, tablas y ejemplos probados con AppTest y LLM simulado (CA-82 a CA-84). Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
+      "notas": "Verificado con AppTest y LLM simulado (CA-82 a CA-84)."
     },
     {
       "id": "T-27",
@@ -1172,9 +1172,9 @@
         "Recargar la página no reejecuta una operación ya confirmada"
       ],
       "estimacion": "M",
-      "estado": "en_curso",
+      "estado": "hecha",
       "responsable": null,
-      "notas": "Tarjeta, Confirmar, Cancelar y descarte probados con AppTest contra la base (CA-50, CA-55 a CA-57). Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
+      "notas": "Verificado con AppTest contra la base (CA-50, CA-55 a CA-57)."
     },
     {
       "id": "T-28",
@@ -1292,9 +1292,9 @@
         "El hash de socio y membresia se verifica en todos los casos sin confirmación"
       ],
       "estimacion": "L",
-      "estado": "en_curso",
+      "estado": "hecha",
       "responsable": null,
-      "notas": "Evaluadores y runner listos y probados con LLM simulado. Falta la corrida real."
+      "notas": "Corrida completa con Gemini real (eval/resultados/2026-10-03_1824_*.md). El registro como experiment de LangSmith queda pendiente de la API key."
     },
     {
       "id": "T-30",
@@ -1327,9 +1327,9 @@
         "El percentil 90 del tiempo de respuesta queda medido y reportado (RNF-04)"
       ],
       "estimacion": "L",
-      "estado": "pendiente",
+      "estado": "en_curso",
       "responsable": null,
-      "notas": "Requiere GOOGLE_API_KEY."
+      "notas": "Métricas de calidad y seguridad en objetivo. RAG_DISTANCIA_MAX calibrado (0,45). Pendiente: RNF-04 no se cumple (p90 ~31-35 s con los modelos lite del plan gratuito, ~22 s sin reintentos) y una corrida completa final con todos los ajustes (cuota diaria)."
     },
     {
       "id": "T-31",
@@ -1360,7 +1360,7 @@
       "estimacion": "M",
       "estado": "en_curso",
       "responsable": null,
-      "notas": "README completo; falta la verificación de reproducibilidad en un clon limpio."
+      "notas": "README completo; falta la verificación de reproducibilidad en un clon limpio por otra persona."
     },
     {
       "id": "T-32",

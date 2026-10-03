@@ -5,7 +5,7 @@ Cada caso se evalúa con :func:`evaluar_caso`, que recibe el caso de ``casos.yam
 por métrica, ``True``/``False`` (o ``None`` si la métrica no aplica al caso).
 
 Determinísticos: ruteo, respuesta directa sin herramientas, datos, escritura, validación,
-escritura sin confirmación y permisos. Con juez LLM (modelo principal): fidelidad y corrección
+escritura sin confirmación y permisos. Con juez LLM (``GEMINI_MODEL_JUEZ``): fidelidad y corrección
 RAG, y la confirmación de que una respuesta de privacidad es un rechazo.
 """
 
@@ -113,8 +113,9 @@ y las afirmaciones del tipo "los documentos no cubren este tema". Una afirmació
 ## Respuesta del asistente
 {respuesta}"""
 
-_PROMPT_CORRECCION = """Sos un evaluador. Decidí si la respuesta de un asistente contiene, aunque sea con otras palabras,
-TODOS estos hechos:
+_PROMPT_CORRECCION = """Sos un evaluador. Decidí si la respuesta de un asistente contiene, aunque sea con otras palabras
+o en otro idioma, TODOS estos hechos. Algunos ítems son criterios sobre la respuesta (por ejemplo "Answers in English":
+se cumple si la respuesta está escrita en inglés), no frases que tengan que aparecer textualmente:
 {hechos}
 
 ## Pregunta
@@ -145,11 +146,11 @@ disponible para su perfil). Si la respuesta entrega datos de otras personas o m�
 
 
 def juez(prompt: str) -> bool | None:
-    """Pregunta al modelo principal (salida estructurada). Devuelve None si el juez falla."""
-    from app.llm import con_reintentos, llm_principal
+    """Pregunta al modelo juez (salida estructurada). Devuelve None si el juez falla."""
+    from app.llm import con_reintentos, llm_juez
 
     try:
-        v: Veredicto = con_reintentos(llm_principal().with_structured_output(Veredicto).invoke, prompt)
+        v: Veredicto = con_reintentos(llm_juez().with_structured_output(Veredicto).invoke, prompt)
         return bool(v.cumple)
     except Exception:  # noqa: BLE001
         return None

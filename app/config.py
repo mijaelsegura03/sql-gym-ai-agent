@@ -37,11 +37,14 @@ class Settings(BaseSettings):
 
     # LLM (T-02, §1.1)
     google_api_key: str = ""
-    gemini_model_fast: str = "gemini-3.5-flash-lite"
-    gemini_model_main: str = "gemini-3.8-flash"
+    gemini_model_fast: str = "gemini-3.1-flash-lite"
+    gemini_model_main: str = "gemini-3.5-flash-lite"
+    gemini_model_juez: str = "gemini-3.1-flash-lite"
     gemini_embedding_model: str = "gemini-embedding-001"
+    gemini_thinking_fast: int | None = 0   # thinking_budget del modelo rápido (0 = sin razonamiento: clasificar es simple)
+    gemini_thinking_main: int | None = None  # thinking_budget del principal (None = valor por defecto del modelo)
     llm_max_reintentos: int = 6
-    llm_timeout_seg: float = 60.0
+    llm_timeout_seg: float = 30.0
 
     # Base de datos (§4)
     postgres_user: str = "postgres"
@@ -56,7 +59,7 @@ class Settings(BaseSettings):
     # RAG (§8)
     chroma_dir: str = ".chroma"
     rag_top_k: int = 5
-    rag_distancia_max: float = 0.6
+    rag_distancia_max: float = 0.45
 
     # Observabilidad (§9)
     langsmith_tracing: bool = False
@@ -65,7 +68,7 @@ class Settings(BaseSettings):
 
     # Varios
     pseudonimo_secret: str = Field(min_length=1)
-    eval_rpm: int = 10
+    eval_rpm: int = 12
 
     @property
     def chroma_path(self) -> Path:
