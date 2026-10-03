@@ -1,0 +1,1404 @@
+{
+  "proyecto": "sql-gym-ai-agent — Punto 3 de la consigna",
+  "version": "0.2",
+  "fecha": "2026-10-03",
+  "specs": {
+    "funcional": "sdd/functional/spec.md v0.4",
+    "tecnico": "sdd/technical/spec.md v0.3"
+  },
+  "convenciones": {
+    "estado": "pendiente | en_curso | hecha | bloqueada",
+    "estimacion": "S (< 2 h) | M (2 a 5 h) | L (> 5 h)",
+    "requisitos": "IDs del spec funcional (RF, RNF, OP, D, R) que la task implementa",
+    "criterios_aceptacion": "CA del spec funcional que la task permite verificar",
+    "spec_tecnico": "Secciones del spec técnico que describen el diseño a implementar",
+    "definicion_de_hecho": "Condiciones verificables para pasar la task a 'hecha'. Toda task incluye además: código documentado (RNF-08) y sin secretos versionados (RNF-06).",
+    "regla_de_cambio": "Si al implementar una task hay que cambiar el diseño, primero se actualiza el spec que corresponda (con su historial de cambios) y después el código."
+  },
+  "hitos": [
+    {
+      "id": "M1",
+      "nombre": "Infraestructura y datos",
+      "fecha_objetivo": "2026-10-05",
+      "tasks": [
+        "T-01",
+        "T-02",
+        "T-03",
+        "T-04",
+        "T-05",
+        "T-06",
+        "T-07",
+        "T-08"
+      ]
+    },
+    {
+      "id": "M2",
+      "nombre": "Núcleo: lectura, RAG y operaciones",
+      "fecha_objetivo": "2026-10-08",
+      "tasks": [
+        "T-09",
+        "T-10",
+        "T-11",
+        "T-12",
+        "T-13",
+        "T-14",
+        "T-15",
+        "T-16",
+        "T-17"
+      ]
+    },
+    {
+      "id": "M3",
+      "nombre": "Agente LangGraph y trazas",
+      "fecha_objetivo": "2026-10-11",
+      "tasks": [
+        "T-18",
+        "T-19",
+        "T-20",
+        "T-21",
+        "T-22",
+        "T-23",
+        "T-24"
+      ]
+    },
+    {
+      "id": "M4",
+      "nombre": "Interfaz Streamlit",
+      "fecha_objetivo": "2026-10-12",
+      "tasks": [
+        "T-25",
+        "T-26",
+        "T-27"
+      ]
+    },
+    {
+      "id": "M5",
+      "nombre": "Evaluación",
+      "fecha_objetivo": "2026-10-14",
+      "tasks": [
+        "T-28",
+        "T-29",
+        "T-30"
+      ]
+    },
+    {
+      "id": "M6",
+      "nombre": "Entrega",
+      "fecha_objetivo": "2026-10-16",
+      "tasks": [
+        "T-31",
+        "T-32",
+        "T-33"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-01",
+      "titulo": "Estructura del repositorio y configuración",
+      "fase": "M1",
+      "descripcion": "Crear la estructura de carpetas del spec técnico, las dependencias fijadas, el archivo de ejemplo de variables de entorno y el módulo de configuración que las lee y valida.",
+      "spec_tecnico": [
+        "§1",
+        "§3",
+        "§10.3"
+      ],
+      "requisitos": [
+        "RNF-06",
+        "RNF-07"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "requirements.txt",
+        ".env.example",
+        ".gitignore",
+        "app/__init__.py",
+        "app/config.py",
+        "README.md"
+      ],
+      "depende_de": [],
+      "definicion_de_hecho": [
+        "requirements.txt con versiones fijadas de langgraph, langchain-google-genai, langsmith, chromadb, pymupdf, sqlglot, psycopg[binary], pydantic, pydantic-settings, streamlit, pytest, python-dotenv y pyyaml",
+        "`pip install -r requirements.txt` funciona en un entorno virtual limpio con Python 3.12 o superior",
+        ".env.example con todas las variables del §10.3, sin valores secretos, y con los secretos internos vacíos para que start.py los genere",
+        ".gitignore incluye .env, .venv/, .chroma/ y cachés",
+        "app/config.py expone un objeto Settings; si falta una variable obligatoria, falla con un mensaje que dice cuál es"
+      ],
+      "estimacion": "S",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-02",
+      "titulo": "docker-compose con PostgreSQL sin volumen",
+      "fase": "M1",
+      "descripcion": "Definir el servicio `db` con postgres:16-alpine, sin volumen, con healthcheck pg_isready y el puerto configurable.",
+      "spec_tecnico": [
+        "§4.1"
+      ],
+      "requisitos": [
+        "RNF-07"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "docker-compose.yml"
+      ],
+      "depende_de": [
+        "T-01"
+      ],
+      "definicion_de_hecho": [
+        "`docker compose up -d db` levanta el contenedor y queda en estado healthy",
+        "No hay ningún volumen declarado: `docker compose down` + `up` arranca con la base vacía",
+        "El usuario, la contraseña y el puerto se toman del .env"
+      ],
+      "estimacion": "S",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-03",
+      "titulo": "Fechas fijas en el script de datos",
+      "fase": "M1",
+      "descripcion": "Reemplazar CURRENT_DATE, NOW() y LOCALTIMESTAMP en gimnasio_datos.sql por la fecha base 2026-10-16, fijada con set_config('gym.fecha_base', ...). Mantener setseed y todas las reglas de negocio del encabezado, y actualizar el encabezado.",
+      "spec_tecnico": [
+        "§4.6",
+        "§14 DT-01"
+      ],
+      "requisitos": [
+        "D-01",
+        "R-03"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "data/gimnasio_datos.sql"
+      ],
+      "depende_de": [
+        "T-02"
+      ],
+      "definicion_de_hecho": [
+        "`grep -n -E \"CURRENT_DATE|NOW\\(\\)|LOCALTIMESTAMP\" data/gimnasio_datos.sql` no devuelve usos (salvo en comentarios explicativos)",
+        "Cargar el script dos veces, en días distintos, genera exactamente los mismos datos (comparación con pg_dump --data-only)",
+        "Todas las tablas siguen teniendo 15 registros o más (R-03)",
+        "Los accesos, pagos y sesiones quedan entre agosto de 2026 y la fecha base, más las sesiones de la semana siguiente"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-04",
+      "titulo": "Esquemas socio_api y agente",
+      "fase": "M1",
+      "descripcion": "Crear las vistas del perfil Socio (públicas, propias y ocupación agregada), filtradas por current_setting('app.socio_id') y con security_barrier, y la tabla agente.auditoria.",
+      "spec_tecnico": [
+        "§4.4",
+        "§4.5"
+      ],
+      "requisitos": [
+        "RF-49",
+        "RF-52",
+        "RF-53",
+        "RF-54",
+        "RNF-01",
+        "RNF-02"
+      ],
+      "criterios_aceptacion": [
+        "CA-44"
+      ],
+      "archivos": [
+        "data/agente_schema.sql"
+      ],
+      "depende_de": [
+        "T-03"
+      ],
+      "definicion_de_hecho": [
+        "Existen todas las vistas de la tabla del §4.4, con las columnas indicadas",
+        "`mis_pagos` no expone registrado_por, y `clase` y `sesion_clase` exponen solo el nombre del instructor",
+        "`ocupacion_sesion` no expone ningún dato de socios",
+        "Con app.socio_id fijado, las vistas propias devuelven solo las filas de ese socio; sin fijarlo, dan error o vuelven vacías",
+        "Existe agente.auditoria con el CHECK de resultado"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-05",
+      "titulo": "Roles y permisos de la base",
+      "fase": "M1",
+      "descripcion": "Crear gym_lector_admin, gym_lector_socio y gym_escritor con los permisos del §4.3, con solo lectura por defecto para los lectores, statement_timeout y search_path del socio. Las contraseñas se pasan por variables.",
+      "spec_tecnico": [
+        "§4.3",
+        "§4.4"
+      ],
+      "requisitos": [
+        "RF-02",
+        "RNF-01",
+        "RNF-02"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "data/roles.sql"
+      ],
+      "depende_de": [
+        "T-04"
+      ],
+      "definicion_de_hecho": [
+        "gym_lector_socio no tiene ningún permiso sobre el esquema public",
+        "gym_lector_admin no puede ejecutar INSERT, UPDATE ni DELETE",
+        "Ningún rol de la app tiene DELETE sobre ninguna tabla",
+        "gym_escritor solo puede escribir donde indica el §4.3"
+      ],
+      "estimacion": "S",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-06",
+      "titulo": "reset_db.py con base plantilla",
+      "fase": "M1",
+      "descripcion": "Script que crea gimnasio_template, ejecuta los 4 scripts SQL en orden con el superusuario y clona la base de trabajo gimnasio. Expone una función para recrear gimnasio desde la plantilla, que usa la evaluación.",
+      "spec_tecnico": [
+        "§4.2"
+      ],
+      "requisitos": [
+        "RF-74",
+        "RNF-07"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "scripts/reset_db.py"
+      ],
+      "depende_de": [
+        "T-05"
+      ],
+      "definicion_de_hecho": [
+        "Con el contenedor levantado, `python scripts/reset_db.py` deja la base gimnasio cargada",
+        "La función de restauración desde la plantilla tarda menos de 2 segundos",
+        "Si un script SQL falla, se informa el archivo y el error, y el proceso termina con código distinto de 0"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-07",
+      "titulo": "start.py: arranque automatizado con un solo comando",
+      "fase": "M1",
+      "descripcion": "Script en la raíz que, desde un clon limpio, deja todo levantado. Implementar las fases A y B del §10.2 y los pasos 10 y 11: verificación de Python, creación de .venv e instalación (y reejecución dentro de .venv), .env con secretos generados, pedido de API keys, inicio de Docker si está apagado, puerto libre, docker compose down/up --wait, reset_db con conteo por tabla y bajada al salir. Flags --sin-ui, --mantener-db y --reinstalar. Los pasos de indexar (9), interfaz (10 por defecto) y evaluación (--evaluar) se conectan en T-14, T-25 y T-29.",
+      "spec_tecnico": [
+        "§10.1",
+        "§10.2",
+        "§10.3"
+      ],
+      "requisitos": [
+        "RNF-07",
+        "DC-08"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "start.py"
+      ],
+      "depende_de": [
+        "T-06"
+      ],
+      "definicion_de_hecho": [
+        "En un clon limpio, con Python y Docker instalados, `python start.py --sin-ui` deja la base levantada y cargada sin ningún otro paso manual que pegar la API key de Gemini",
+        "La fase A usa solo la biblioteca estándar",
+        "Una segunda ejecución no reinstala dependencias ni vuelve a pedir las API keys",
+        "Nunca pisa un valor existente del .env",
+        "Con Docker Desktop apagado (Windows), lo inicia y espera a que responda",
+        "Con el puerto 5433 ocupado, usa otro puerto libre y lo informa",
+        "Imprime cada paso con su tiempo; ante un error muestra qué falló y cómo resolverlo, sin traceback",
+        "Al salir con Ctrl+C baja el contenedor (salvo con --mantener-db)",
+        "Probado en Windows (PowerShell) y en Linux o macOS"
+      ],
+      "estimacion": "L",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-08",
+      "titulo": "Tests de datos y de permisos de la base",
+      "fase": "M1",
+      "descripcion": "Escribir test_datos.py (verifica que existan los casos que necesitan los CA) y test_permisos_db.py (aislamiento del socio, solo lectura y ausencia de DELETE). Si falta algún caso en los datos, ajustar gimnasio_datos.sql.",
+      "spec_tecnico": [
+        "§9.4 (verificación de los datos)",
+        "§12"
+      ],
+      "requisitos": [
+        "D-01",
+        "RNF-01",
+        "RNF-02"
+      ],
+      "criterios_aceptacion": [
+        "CA-17",
+        "CA-58",
+        "CA-71",
+        "CA-72"
+      ],
+      "archivos": [
+        "tests/conftest.py",
+        "tests/test_datos.py",
+        "tests/test_permisos_db.py",
+        "pytest.ini"
+      ],
+      "depende_de": [
+        "T-07"
+      ],
+      "definicion_de_hecho": [
+        "`pytest -m db` pasa con la base recién cargada",
+        "Hay al menos un socio con membresía activa, uno con congelada, uno con una pendiente sin activa (CA-58), uno suspendido y uno de baja",
+        "Hay accesos rechazados por cada motivo de DOC-01 §4 y aptos vencidos",
+        "Hay un nombre de pila repetido entre socios (CA-17) y socios en las tres sedes",
+        "El socio fijado en app.socio_id no ve filas de otro socio en ninguna vista propia"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-09",
+      "titulo": "Fábrica de modelos Gemini",
+      "fase": "M2",
+      "descripcion": "app/llm.py con funciones para obtener el modelo rápido, el principal y los embeddings, con temperature configurable, timeout y reintentos con backoff exponencial ante el error 429.",
+      "spec_tecnico": [
+        "§1.1"
+      ],
+      "requisitos": [
+        "RNF-04",
+        "RNF-05",
+        "RNF-06"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "app/llm.py"
+      ],
+      "depende_de": [
+        "T-01"
+      ],
+      "definicion_de_hecho": [
+        "Los nombres de los modelos salen de la configuración, no del código",
+        "Una llamada de prueba a cada modelo responde con la API key del .env",
+        "Ante un 429 simulado se reintenta con espera creciente y un máximo configurable"
+      ],
+      "estimacion": "S",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-10",
+      "titulo": "Identificación de usuarios y seudónimo",
+      "fase": "M2",
+      "descripcion": "app/auth.py: identificar(perfil, dni) devuelve un Usuario o None, con las reglas de RF-50 (los socios en cualquier estado; empleados activos con rol administracion, gerente o recepcion). Calcula el alcance de sede y el seudónimo HMAC. Incluye las conexiones por rol de app/db/conexion.py.",
+      "spec_tecnico": [
+        "§4.3",
+        "§5.1"
+      ],
+      "requisitos": [
+        "RF-50",
+        "RF-51",
+        "RF-55",
+        "RF-71",
+        "S-03"
+      ],
+      "criterios_aceptacion": [
+        "CA-80",
+        "CA-81",
+        "CA-86"
+      ],
+      "archivos": [
+        "app/auth.py",
+        "app/db/conexion.py",
+        "tests/test_auth.py"
+      ],
+      "depende_de": [
+        "T-05",
+        "T-08"
+      ],
+      "definicion_de_hecho": [
+        "test_auth.py cubre: socio válido, los tres roles de admin, instructor, empleado inactivo y DNI de empleado con perfil Socio",
+        "Las consultas de identificación son parametrizadas",
+        "El objeto Usuario no contiene el DNI en claro",
+        "El administrador de administración central (sede_id NULL) tiene sede_alcance None"
+      ],
+      "estimacion": "S",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-11",
+      "titulo": "Catálogos de esquema para text-to-SQL",
+      "fase": "M2",
+      "descripcion": "Escribir a mano admin.md y socio.md: tablas o vistas, columnas, valores de los campos enumerados, relaciones, la semántica derivada del §4.7, sinónimos del dominio y entre 6 y 8 ejemplos de pregunta → SQL por perfil.",
+      "spec_tecnico": [
+        "§4.7",
+        "§6.1"
+      ],
+      "requisitos": [
+        "RF-01",
+        "RF-06",
+        "RF-07",
+        "RF-08",
+        "RF-18"
+      ],
+      "criterios_aceptacion": [
+        "CA-10",
+        "CA-11",
+        "CA-12",
+        "CA-13",
+        "CA-14",
+        "CA-15",
+        "CA-16"
+      ],
+      "archivos": [
+        "app/db/catalogos/admin.md",
+        "app/db/catalogos/socio.md"
+      ],
+      "depende_de": [
+        "T-04"
+      ],
+      "definicion_de_hecho": [
+        "Todas las tablas del esquema están en admin.md, y todas las vistas de socio_api en socio.md",
+        "socio.md no menciona ninguna tabla de public",
+        "Cada SQL de ejemplo se ejecuta sin error con el rol correspondiente",
+        "Están documentadas las definiciones de membresía vigente, moroso, apto vigente, pago válido y asistencia"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-12",
+      "titulo": "Validación y ejecución de SQL de lectura",
+      "fase": "M2",
+      "descripcion": "app/db/lectura.py: validar_sql(sql, perfil) con sqlglot (§6.2) y ejecutar_lectura(sql, usuario) en una transacción READ ONLY con el rol del perfil, set_config del socio, LIMIT 51, el conteo total y la conversión de tipos (§6.3).",
+      "spec_tecnico": [
+        "§6.2",
+        "§6.3"
+      ],
+      "requisitos": [
+        "RF-02",
+        "RF-04",
+        "RF-05",
+        "RNF-01",
+        "RNF-02"
+      ],
+      "criterios_aceptacion": [
+        "CA-12",
+        "CA-40",
+        "CA-43",
+        "CA-68"
+      ],
+      "archivos": [
+        "app/db/lectura.py",
+        "tests/test_validar_sql.py"
+      ],
+      "depende_de": [
+        "T-10"
+      ],
+      "definicion_de_hecho": [
+        "test_validar_sql.py rechaza: escrituras, DDL, varias sentencias, SELECT INTO, set_config, current_setting, pg_sleep y tablas de public con perfil socio",
+        "test_validar_sql.py acepta: SELECT con JOIN, WITH, agregados y funciones de fecha",
+        "Una consulta de más de 50 filas devuelve 50 filas y el total real",
+        "Los errores de la base se devuelven como texto para el reintento, sin cortar el proceso"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-13",
+      "titulo": "Ingesta de PDFs en Chroma",
+      "fase": "M2",
+      "descripcion": "app/rag/ingesta.py y scripts/indexar_pdfs.py: extracción con PyMuPDF, tablas a Markdown, limpieza de encabezados y pies, chunking por sección y por pregunta frecuente, metadatos, embeddings RETRIEVAL_DOCUMENT y hashes de los PDFs para reindexar solo si cambiaron.",
+      "spec_tecnico": [
+        "§8.1"
+      ],
+      "requisitos": [
+        "RF-09",
+        "RF-10",
+        "R-02",
+        "S-02"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "app/rag/ingesta.py",
+        "scripts/indexar_pdfs.py",
+        "tests/test_ingesta.py"
+      ],
+      "depende_de": [
+        "T-09"
+      ],
+      "definicion_de_hecho": [
+        "Los 4 PDFs quedan indexados en la colección politicas con doc_id, seccion y pagina en cada chunk",
+        "La tabla de motivos de rechazo de DOC-01 §4 queda con cada motivo junto a su explicación y su solución",
+        "Una segunda ejecución sin cambios no llama a la API de embeddings",
+        "test_ingesta.py verifica el chunking y los metadatos sin llamar a la API"
+      ],
+      "estimacion": "L",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-14",
+      "titulo": "Buscador RAG y conexión al arranque",
+      "fase": "M2",
+      "descripcion": "app/rag/buscador.py: buscar(consulta, k) con RETRIEVAL_QUERY y filtro por RAG_DISTANCIA_MAX, devolviendo una lista de Fragmento con su etiqueta de cita. Agregar el paso 5 (indexar si hace falta, --reindexar) a start.py (paso 9 del §10.2).",
+      "spec_tecnico": [
+        "§8.2",
+        "§8.4",
+        "§10.2"
+      ],
+      "requisitos": [
+        "RF-09",
+        "RF-11",
+        "RF-12"
+      ],
+      "criterios_aceptacion": [
+        "CA-20",
+        "CA-21",
+        "CA-22",
+        "CA-24"
+      ],
+      "archivos": [
+        "app/rag/buscador.py",
+        "start.py"
+      ],
+      "depende_de": [
+        "T-13",
+        "T-07"
+      ],
+      "definicion_de_hecho": [
+        "\"¿Cuánto dura el apto médico?\" devuelve un fragmento de DOC-04 entre los primeros 3",
+        "\"¿Se puede ir con mascotas?\" devuelve una lista vacía o fragmentos por encima del umbral (valor inicial; se calibra en T-30)",
+        "Cada Fragmento tiene la etiqueta [DOC-0X §N, p. P]",
+        "start.py indexa solo si hace falta"
+      ],
+      "estimacion": "S",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-15",
+      "titulo": "Modelos de las operaciones de escritura",
+      "fase": "M2",
+      "descripcion": "app/ops/modelos.py: los modelos Pydantic del §7.1 (OperacionSocio con discriminador), PropuestaCambio y ResultadoValidacion.",
+      "spec_tecnico": [
+        "§7.1",
+        "§7.2"
+      ],
+      "requisitos": [
+        "OP-01",
+        "OP-02",
+        "OP-03",
+        "OP-04",
+        "OP-05",
+        "RF-42",
+        "RF-43",
+        "RF-45"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "app/ops/__init__.py",
+        "app/ops/modelos.py"
+      ],
+      "depende_de": [
+        "T-01"
+      ],
+      "definicion_de_hecho": [
+        "Los campos de datos del alta son opcionales, para que la validación informe los faltantes",
+        "Los modelos se pueden usar como salida estructurada de Gemini (with_structured_output)",
+        "PropuestaCambio incluye antes, despues, efectos, advertencias y errores"
+      ],
+      "estimacion": "S",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-16",
+      "titulo": "Validaciones de negocio de las operaciones",
+      "fase": "M2",
+      "descripcion": "app/ops/validacion.py: todas las reglas de la tabla del §7.2 como código Python con consultas parametrizadas (resolución del socio, alcance de sede, obligatorios, unicidad, edad, estados de origen, membresías en la baja y efectos de la suspensión) y armado de la PropuestaCambio.",
+      "spec_tecnico": [
+        "§7.2",
+        "§4.7",
+        "§14 DT-03"
+      ],
+      "requisitos": [
+        "OP-01",
+        "OP-02",
+        "OP-03",
+        "OP-04",
+        "OP-05",
+        "RF-41",
+        "RF-42",
+        "RF-43",
+        "RF-44",
+        "RF-45",
+        "DC-05"
+      ],
+      "criterios_aceptacion": [
+        "CA-50",
+        "CA-51",
+        "CA-52",
+        "CA-53",
+        "CA-54",
+        "CA-58",
+        "CA-62",
+        "CA-63",
+        "CA-64",
+        "CA-65",
+        "CA-66",
+        "CA-67",
+        "CA-69",
+        "CA-70",
+        "CA-71",
+        "CA-72"
+      ],
+      "archivos": [
+        "app/ops/validacion.py",
+        "tests/test_validacion_ops.py"
+      ],
+      "depende_de": [
+        "T-15",
+        "T-10",
+        "T-08"
+      ],
+      "definicion_de_hecho": [
+        "test_validacion_ops.py tiene, por cada regla del §7.2, al menos un caso que pasa y uno que falla",
+        "La edad se calcula con la fecha real, inyectable en los tests",
+        "La baja con membresía activa o congelada informa la fecha de fin",
+        "Ninguna validación depende del LLM"
+      ],
+      "estimacion": "L",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-17",
+      "titulo": "Ejecución atómica y auditoría",
+      "fase": "M2",
+      "descripcion": "app/ops/ejecucion.py y auditoria.py: transacción con gym_escritor, SELECT FOR UPDATE, revalidación, sentencias fijas parametrizadas, efectos secundarios y fila de auditoría. Registro de las propuestas canceladas, descartadas y rechazadas.",
+      "spec_tecnico": [
+        "§7.3",
+        "§4.5"
+      ],
+      "requisitos": [
+        "RF-48",
+        "RF-49",
+        "RNF-02",
+        "RNF-03"
+      ],
+      "criterios_aceptacion": [
+        "CA-52",
+        "CA-55",
+        "CA-58"
+      ],
+      "archivos": [
+        "app/ops/ejecucion.py",
+        "app/ops/auditoria.py",
+        "tests/test_ejecucion_ops.py"
+      ],
+      "depende_de": [
+        "T-16"
+      ],
+      "definicion_de_hecho": [
+        "Si la operación falla a mitad, la base queda sin cambios (test con una falla forzada)",
+        "Si el estado cambió entre la propuesta y la confirmación, la operación no se ejecuta y queda en la auditoría como fallida",
+        "Cada operación ejecutada deja una fila con antes, después, motivo y trace_id",
+        "El módulo no ejecuta ningún SQL que no esté escrito en el código"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-18",
+      "titulo": "Grafo base: estado, clasificación y respuesta directa",
+      "fase": "M3",
+      "descripcion": "app/agent/estado.py (EstadoAgente, Clasificacion, RespuestaAgente), el prompt y el nodo clasificar, los nodos responder_directo y rechazar_permiso, y la construcción del grafo con las aristas condicionales por perfil evaluadas en código. Una función de entrada que crea un thread_id por mensaje.",
+      "spec_tecnico": [
+        "§5.1",
+        "§5.2",
+        "§5.3",
+        "§5.4",
+        "§5.5",
+        "§5.6"
+      ],
+      "requisitos": [
+        "RF-14",
+        "RF-15",
+        "RF-16",
+        "RF-17",
+        "RF-19",
+        "RF-20",
+        "RF-21",
+        "RF-40",
+        "RF-53",
+        "RF-55",
+        "RNF-01"
+      ],
+      "criterios_aceptacion": [
+        "CA-01",
+        "CA-02",
+        "CA-03",
+        "CA-04",
+        "CA-05",
+        "CA-06",
+        "CA-42",
+        "CA-60",
+        "CA-61"
+      ],
+      "archivos": [
+        "app/agent/estado.py",
+        "app/agent/grafo.py",
+        "app/agent/nodos/clasificar.py",
+        "app/agent/nodos/directo.py",
+        "app/agent/prompts/clasificar.md"
+      ],
+      "depende_de": [
+        "T-09",
+        "T-10"
+      ],
+      "definicion_de_hecho": [
+        "\"Hola, ¿cómo estás?\" se resuelve con una sola llamada al LLM y la lista de herramientas vacía",
+        "Un socio que pide una escritura llega a rechazar_permiso aunque el LLM haya clasificado `escritura`",
+        "\"¿y cuántos de ellos…?\" se clasifica como necesita_contexto",
+        "Cada invocación usa un thread_id nuevo"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-19",
+      "titulo": "Ruta de datos: generar, ejecutar y sintetizar",
+      "fase": "M3",
+      "descripcion": "Nodos generar_sql (prompt con el catálogo del perfil, la fecha de hoy y el error previo), ejecutar_sql (herramienta consulta_sql, con hasta 2 reintentos) y sintetizar para los datos (formato de montos y fechas, ambigüedad, resultados vacíos, idioma). La SQL se filtra en código para el perfil socio.",
+      "spec_tecnico": [
+        "§5.2",
+        "§5.6",
+        "§6"
+      ],
+      "requisitos": [
+        "RF-01",
+        "RF-03",
+        "RF-04",
+        "RF-05",
+        "RF-06",
+        "RF-07",
+        "RF-08",
+        "RF-18",
+        "RF-22",
+        "RF-23",
+        "RF-52",
+        "RF-56",
+        "RNF-05"
+      ],
+      "criterios_aceptacion": [
+        "CA-10",
+        "CA-11",
+        "CA-12",
+        "CA-13",
+        "CA-14",
+        "CA-15",
+        "CA-16",
+        "CA-17",
+        "CA-40",
+        "CA-41",
+        "CA-43",
+        "CA-44"
+      ],
+      "archivos": [
+        "app/agent/nodos/sql.py",
+        "app/agent/nodos/sintetizar.py",
+        "app/agent/prompts/generar_sql.md",
+        "app/agent/prompts/sintetizar.md"
+      ],
+      "depende_de": [
+        "T-18",
+        "T-11",
+        "T-12"
+      ],
+      "definicion_de_hecho": [
+        "CA-10 a CA-17 dan la respuesta correcta probando a mano",
+        "Con perfil socio, CA-40, CA-41 y CA-43 no devuelven datos de terceros, aunque el clasificador no detecte el pedido",
+        "Una SQL inválida se reintenta como máximo 2 veces y después se responde con un mensaje comprensible (RF-23)",
+        "RespuestaAgente.sql es None para el perfil socio"
+      ],
+      "estimacion": "L",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-20",
+      "titulo": "Ruta de documentos con citas",
+      "fase": "M3",
+      "descripcion": "Nodo buscar_documentos (herramienta busqueda_documentos) y la variante de sintetizar para documentos: citar solo con las etiquetas recibidas, responder en el idioma del mensaje, decir explícitamente cuando no hay cobertura y armar las fuentes en código a partir de los metadatos.",
+      "spec_tecnico": [
+        "§5.2",
+        "§8.2",
+        "§8.3",
+        "§8.4"
+      ],
+      "requisitos": [
+        "RF-09",
+        "RF-10",
+        "RF-11",
+        "RF-12",
+        "RF-13",
+        "RF-19"
+      ],
+      "criterios_aceptacion": [
+        "CA-20",
+        "CA-21",
+        "CA-22",
+        "CA-23",
+        "CA-24"
+      ],
+      "archivos": [
+        "app/agent/nodos/documentos.py",
+        "app/agent/nodos/sintetizar.py"
+      ],
+      "depende_de": [
+        "T-18",
+        "T-14"
+      ],
+      "definicion_de_hecho": [
+        "CA-20 a CA-24 responden correctamente probando a mano",
+        "CA-23 responde en inglés con citas a documentos en castellano",
+        "Las fuentes de la respuesta salen de los metadatos de los fragmentos, no de texto libre del LLM"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-21",
+      "titulo": "Ruta híbrida en paralelo",
+      "fase": "M3",
+      "descripcion": "Fan-out de la rama SQL y la rama de documentos, con sintetizar esperando a las dos y combinando hechos de la base con reglas de los documentos, con ambas fuentes indicadas.",
+      "spec_tecnico": [
+        "§5.3"
+      ],
+      "requisitos": [
+        "RF-14",
+        "RF-18",
+        "RF-19"
+      ],
+      "criterios_aceptacion": [
+        "CA-30",
+        "CA-31",
+        "CA-32",
+        "CA-33"
+      ],
+      "archivos": [
+        "app/agent/grafo.py",
+        "app/agent/prompts/sintetizar.md"
+      ],
+      "depende_de": [
+        "T-19",
+        "T-20"
+      ],
+      "definicion_de_hecho": [
+        "CA-30 a CA-33 responden con las dos fuentes indicadas",
+        "La traza muestra las dos herramientas ejecutadas en paralelo"
+      ],
+      "estimacion": "S",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-22",
+      "titulo": "Ruta de escritura con confirmación",
+      "fase": "M3",
+      "descripcion": "Nodos extraer_operacion (salida estructurada OperacionSocio), validar_operacion (herramienta operacion_socio), confirmar con interrupt(), ejecutar_operacion y responder_operacion con plantillas en castellano y en inglés. Checkpointer MemorySaver y reanudación con Command(resume=...). Función para descartar un hilo pendiente y registrarlo como 'descartada'.",
+      "spec_tecnico": [
+        "§5.2",
+        "§5.3",
+        "§5.5",
+        "§7"
+      ],
+      "requisitos": [
+        "OP-01",
+        "OP-02",
+        "OP-03",
+        "OP-04",
+        "OP-05",
+        "RF-40",
+        "RF-41",
+        "RF-42",
+        "RF-43",
+        "RF-44",
+        "RF-45",
+        "RF-46",
+        "RF-47",
+        "RF-48",
+        "RF-49"
+      ],
+      "criterios_aceptacion": [
+        "CA-50",
+        "CA-51",
+        "CA-52",
+        "CA-53",
+        "CA-54",
+        "CA-55",
+        "CA-56",
+        "CA-57",
+        "CA-58",
+        "CA-60",
+        "CA-61",
+        "CA-62",
+        "CA-63",
+        "CA-64",
+        "CA-65",
+        "CA-66",
+        "CA-67",
+        "CA-68",
+        "CA-69",
+        "CA-70",
+        "CA-71",
+        "CA-72"
+      ],
+      "archivos": [
+        "app/agent/nodos/escritura.py",
+        "app/agent/prompts/extraer_operacion.md",
+        "app/agent/grafo.py"
+      ],
+      "depende_de": [
+        "T-18",
+        "T-17"
+      ],
+      "definicion_de_hecho": [
+        "Una operación válida se detiene en el interrupt y no escribe nada hasta la reanudación con 'confirmar'",
+        "'cancelar' y descartar no escriben y quedan en la auditoría",
+        "Un mensaje \"sí\" en un hilo nuevo no ejecuta ninguna propuesta (CA-57)",
+        "Si falta un dato, el LLM no lo inventa: la respuesta lista los faltantes (CA-63)"
+      ],
+      "estimacion": "L",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-23",
+      "titulo": "Tests del grafo con LLM simulado",
+      "fase": "M3",
+      "descripcion": "test_grafo_rutas.py: con un LLM falso que devuelve clasificaciones fijas, verificar el recorrido de nodos de cada ruta, las herramientas registradas y las barreras por perfil.",
+      "spec_tecnico": [
+        "§12"
+      ],
+      "requisitos": [
+        "RF-14",
+        "RF-15",
+        "RF-40",
+        "RNF-01"
+      ],
+      "criterios_aceptacion": [
+        "CA-01",
+        "CA-60",
+        "CA-61",
+        "CA-84"
+      ],
+      "archivos": [
+        "tests/test_grafo_rutas.py"
+      ],
+      "depende_de": [
+        "T-21",
+        "T-22"
+      ],
+      "definicion_de_hecho": [
+        "Hay un test por ruta que verifica la secuencia de nodos",
+        "Hay un test que verifica que, con perfil socio y clasificación 'escritura', nunca se ejecuta extraer_operacion",
+        "Hay un test que verifica que la ruta directa deja la lista de herramientas vacía",
+        "Corren sin red ni Docker"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-24",
+      "titulo": "Trazas en LangSmith",
+      "fase": "M3",
+      "descripcion": "Metadata (perfil, seudónimo, thread_id) y tags (ruta) en cada invocación, @traceable(run_type='tool') en las herramientas y trace_id en RespuestaAgente y en la auditoría. Verificar que el DNI del usuario no aparezca en las trazas.",
+      "spec_tecnico": [
+        "§9.1"
+      ],
+      "requisitos": [
+        "RF-70",
+        "RF-71",
+        "RF-49"
+      ],
+      "criterios_aceptacion": [
+        "CA-43",
+        "CA-84",
+        "CA-85"
+      ],
+      "archivos": [
+        "app/agent/grafo.py",
+        "app/agent/nodos/"
+      ],
+      "depende_de": [
+        "T-22"
+      ],
+      "definicion_de_hecho": [
+        "En LangSmith se ve, por cada mensaje: la ruta, los nodos, las llamadas al LLM, la SQL y su resultado, los fragmentos, la propuesta con su decisión y los tiempos por paso",
+        "Se puede filtrar por la tag de ruta",
+        "Buscar el DNI del usuario en las trazas no devuelve resultados"
+      ],
+      "estimacion": "S",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-25",
+      "titulo": "Interfaz: ingreso y sesión",
+      "fase": "M4",
+      "descripcion": "Pantalla de ingreso (perfil, DNI y mensaje genérico de error), session_state, cierre de sesión y grafo cacheado con st.cache_resource. Conectar el paso 10 de start.py: lanzar Streamlit e imprimir la URL y un DNI de ejemplo por perfil.",
+      "spec_tecnico": [
+        "§11",
+        "§10.2"
+      ],
+      "requisitos": [
+        "RF-50",
+        "RF-51",
+        "RF-57",
+        "RF-60",
+        "RF-61"
+      ],
+      "criterios_aceptacion": [
+        "CA-80",
+        "CA-81",
+        "CA-86"
+      ],
+      "archivos": [
+        "app/ui/app.py",
+        "start.py"
+      ],
+      "depende_de": [
+        "T-10",
+        "T-18",
+        "T-07"
+      ],
+      "definicion_de_hecho": [
+        "`python start.py` termina con la interfaz abierta en el navegador y muestra en la consola un DNI de ejemplo por perfil",
+        "CA-80, CA-81 y CA-86 se verifican a mano",
+        "Cerrar la sesión vuelve a la pantalla de ingreso y limpia el estado"
+      ],
+      "estimacion": "S",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-26",
+      "titulo": "Interfaz: chat, detalle, tablas y ejemplos",
+      "fase": "M4",
+      "descripcion": "Chat con historial visual, indicador de procesando, expander Detalle (ruta, herramientas, SQL solo para el admin y fragmentos), st.dataframe con 'Mostrando 50 de N', barra lateral con el usuario y su alcance, preguntas de ejemplo por perfil y botón para limpiar el historial.",
+      "spec_tecnico": [
+        "§11"
+      ],
+      "requisitos": [
+        "RF-03",
+        "RF-56",
+        "RF-62",
+        "RF-63",
+        "RF-64",
+        "RF-66",
+        "RF-67"
+      ],
+      "criterios_aceptacion": [
+        "CA-82",
+        "CA-83",
+        "CA-84"
+      ],
+      "archivos": [
+        "app/ui/app.py"
+      ],
+      "depende_de": [
+        "T-25",
+        "T-21"
+      ],
+      "definicion_de_hecho": [
+        "CA-82, CA-83 y CA-84 se verifican a mano",
+        "Las preguntas de ejemplo del admin incluyen al menos una de escritura",
+        "Los errores del agente se muestran como mensaje comprensible, sin traceback"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-27",
+      "titulo": "Interfaz: tarjeta de propuesta de cambio",
+      "fase": "M4",
+      "descripcion": "Tarjeta con la tabla antes/después, las advertencias y los botones Confirmar y Cancelar (key = thread_id). Después de decidir muestra el resultado y deshabilita los botones. Si llega un mensaje nuevo con una propuesta pendiente, se descarta y se registra.",
+      "spec_tecnico": [
+        "§11",
+        "§5.5"
+      ],
+      "requisitos": [
+        "RF-46",
+        "RF-47",
+        "RF-65"
+      ],
+      "criterios_aceptacion": [
+        "CA-50",
+        "CA-55",
+        "CA-56",
+        "CA-57"
+      ],
+      "archivos": [
+        "app/ui/app.py"
+      ],
+      "depende_de": [
+        "T-26",
+        "T-22"
+      ],
+      "definicion_de_hecho": [
+        "CA-50, CA-55, CA-56 y CA-57 se verifican a mano en la interfaz",
+        "Recargar la página no reejecuta una operación ya confirmada"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-28",
+      "titulo": "Conjunto de evaluación",
+      "fase": "M5",
+      "descripcion": "eval/casos.yaml con al menos 40 casos que cubran todas las categorías: todos los CA automatizables del §7 funcional más variantes en inglés. Elegir los DNI de los datos (DT-02), calcular los esperados sobre la base recién cargada y revisarlos a mano. Marcar depende_fecha y valido_hasta donde corresponda.",
+      "spec_tecnico": [
+        "§9.2",
+        "§14 DT-02"
+      ],
+      "requisitos": [
+        "RF-72",
+        "RF-76",
+        "S-05"
+      ],
+      "criterios_aceptacion": [
+        "CA-01",
+        "CA-02",
+        "CA-03",
+        "CA-04",
+        "CA-05",
+        "CA-06",
+        "CA-10",
+        "CA-11",
+        "CA-12",
+        "CA-13",
+        "CA-14",
+        "CA-15",
+        "CA-16",
+        "CA-17",
+        "CA-20",
+        "CA-21",
+        "CA-22",
+        "CA-23",
+        "CA-24",
+        "CA-30",
+        "CA-31",
+        "CA-32",
+        "CA-33",
+        "CA-40",
+        "CA-41",
+        "CA-42",
+        "CA-43",
+        "CA-44",
+        "CA-50",
+        "CA-51",
+        "CA-52",
+        "CA-53",
+        "CA-54",
+        "CA-55",
+        "CA-56",
+        "CA-57",
+        "CA-58",
+        "CA-60",
+        "CA-61",
+        "CA-62",
+        "CA-63",
+        "CA-64",
+        "CA-65",
+        "CA-66",
+        "CA-67",
+        "CA-68",
+        "CA-69",
+        "CA-70",
+        "CA-71",
+        "CA-72"
+      ],
+      "archivos": [
+        "eval/casos.yaml"
+      ],
+      "depende_de": [
+        "T-08"
+      ],
+      "definicion_de_hecho": [
+        "Hay 40 casos o más y cada categoría del §9.2 tiene al menos 3",
+        "Cada CA automatizable del spec funcional tiene al menos un caso con su mismo ID",
+        "Los esperados de datos están verificados con una consulta manual documentada en un comentario",
+        "Los casos con fechas relativas tienen depende_fecha: true y valido_hasta"
+      ],
+      "estimacion": "L",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-29",
+      "titulo": "Evaluadores y runner de evaluación",
+      "fase": "M5",
+      "descripcion": "eval/evaluadores.py con los evaluadores del §9.4 (determinísticos y jueces LLM) y scripts/run_eval.py: reset, carga del dataset en LangSmith, evaluate() con la función objetivo que identifica, invoca y reanuda; lecturas primero y escrituras después, con restauración antes de cada caso de escritura; EVAL_RPM; reporte Markdown. Conectar el flag --evaluar de start.py.",
+      "spec_tecnico": [
+        "§9.3",
+        "§9.4"
+      ],
+      "requisitos": [
+        "RF-73",
+        "RF-74",
+        "RF-75",
+        "RF-77"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "eval/evaluadores.py",
+        "scripts/run_eval.py",
+        "eval/resultados/",
+        "start.py"
+      ],
+      "depende_de": [
+        "T-28",
+        "T-23",
+        "T-24"
+      ],
+      "definicion_de_hecho": [
+        "`python start.py --evaluar` (o `python scripts/run_eval.py` con la base levantada) corre la evaluación completa y termina con un experiment en LangSmith",
+        "Genera eval/resultados/<fecha>_<commit>.md con las métricas del §5.8.1 en total y por caso",
+        "Dos corridas seguidas parten del mismo estado de la base",
+        "El hash de socio y membresia se verifica en todos los casos sin confirmación"
+      ],
+      "estimacion": "L",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-30",
+      "titulo": "Primera corrida, calibración y ajustes",
+      "fase": "M5",
+      "descripcion": "Correr la evaluación, calibrar RAG_DISTANCIA_MAX (DT-04), ajustar los prompts y los catálogos según los fallos y revisar los objetivos de métricas (DC-01). Registrar cada cambio de objetivo en el historial del spec funcional.",
+      "spec_tecnico": [
+        "§9",
+        "§14 DT-04"
+      ],
+      "requisitos": [
+        "RF-11",
+        "DC-01",
+        "RNF-04"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        ".env.example",
+        "app/agent/prompts/",
+        "app/db/catalogos/",
+        "sdd/functional/spec.md"
+      ],
+      "depende_de": [
+        "T-29"
+      ],
+      "definicion_de_hecho": [
+        "Las métricas de seguridad están en 100 % o 0 según corresponda: respuesta directa sin herramientas, privacidad de lectura, permisos de escritura y escritura sin confirmación",
+        "Las demás métricas alcanzan el objetivo, o el objetivo se ajusta con su justificación en el historial del spec funcional",
+        "El valor de RAG_DISTANCIA_MAX queda en .env.example con su justificación",
+        "El percentil 90 del tiempo de respuesta queda medido y reportado (RNF-04)"
+      ],
+      "estimacion": "L",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-31",
+      "titulo": "README y verificación de reproducibilidad",
+      "fase": "M6",
+      "descripcion": "README completo: requisitos manuales (Python 3.12+, Docker y API keys de Gemini y LangSmith), arranque con `python start.py` y sus flags, uso con los DNI de ejemplo por perfil, tests, evaluación, estructura del repositorio y solución de problemas comunes (Docker apagado, puerto ocupado, error 429). Revisar los docstrings de los módulos públicos.",
+      "spec_tecnico": [
+        "§10",
+        "§3"
+      ],
+      "requisitos": [
+        "RNF-07",
+        "RNF-08"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "README.md"
+      ],
+      "depende_de": [
+        "T-30",
+        "T-27"
+      ],
+      "definicion_de_hecho": [
+        "Alguien que no participó del desarrollo, en un clon limpio, levanta la app con `python start.py` siguiendo solo el README",
+        "Todos los módulos de app/ tienen docstring y las funciones públicas también",
+        "`pytest` pasa completo"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-32",
+      "titulo": "Informe técnico",
+      "fase": "M6",
+      "descripcion": "Informe de 10 páginas como máximo: modelo de datos, arquitectura del agente (grafo, permisos, RAG), decisiones técnicas, ejemplos de consultas por ruta, evidencias (capturas de la interfaz, trazas de LangSmith y reporte de evaluación) y la metodología SDD aplicada.",
+      "spec_tecnico": [],
+      "requisitos": [
+        "RF-77"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "docs/informe.pdf"
+      ],
+      "depende_de": [
+        "T-30"
+      ],
+      "definicion_de_hecho": [
+        "10 páginas o menos",
+        "Incluye el modelo de datos, la arquitectura, ejemplos de consultas y evidencias de funcionamiento, como pide la consigna"
+      ],
+      "estimacion": "L",
+      "estado": "pendiente",
+      "responsable": null
+    },
+    {
+      "id": "T-33",
+      "titulo": "Cierre de artefactos SDD",
+      "fase": "M6",
+      "descripcion": "Dejar los specs en su versión final, con el historial completo, y este archivo con todas las tasks en estado 'hecha'. Verificar la trazabilidad: cada RF, RNF y OP del spec funcional está cubierto por al menos una task, y cada CA automatizable por al menos un caso de evaluación.",
+      "spec_tecnico": [
+        "§13"
+      ],
+      "requisitos": [
+        "R-04"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "sdd/functional/spec.md",
+        "sdd/technical/spec.md",
+        "sdd/tasks.json"
+      ],
+      "depende_de": [
+        "T-31",
+        "T-32"
+      ],
+      "definicion_de_hecho": [
+        "No quedan decisiones abiertas en ningún spec",
+        "La verificación de trazabilidad no encuentra requisitos sin task ni CA automatizables sin caso",
+        "Los artefactos están commiteados en el repositorio de la entrega"
+      ],
+      "estimacion": "S",
+      "estado": "pendiente",
+      "responsable": null
+    }
+  ]
+}
