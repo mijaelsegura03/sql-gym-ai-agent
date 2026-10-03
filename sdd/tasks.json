@@ -1,10 +1,10 @@
 {
   "proyecto": "sql-gym-ai-agent — Punto 3 de la consigna",
-  "version": "0.2",
+  "version": "0.3",
   "fecha": "2026-10-03",
   "specs": {
     "funcional": "sdd/functional/spec.md v0.4",
-    "tecnico": "sdd/technical/spec.md v0.3"
+    "tecnico": "sdd/technical/spec.md v0.4"
   },
   "convenciones": {
     "estado": "pendiente | en_curso | hecha | bloqueada",
@@ -125,7 +125,7 @@
         "app/config.py expone un objeto Settings; si falta una variable obligatoria, falla con un mensaje que dice cuál es"
       ],
       "estimacion": "S",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null
     },
     {
@@ -152,7 +152,7 @@
         "El usuario, la contraseña y el puerto se toman del .env"
       ],
       "estimacion": "S",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null
     },
     {
@@ -182,7 +182,7 @@
         "Los accesos, pagos y sesiones quedan entre agosto de 2026 y la fecha base, más las sesiones de la semana siguiente"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null
     },
     {
@@ -219,7 +219,7 @@
         "Existe agente.auditoria con el CHECK de resultado"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null
     },
     {
@@ -250,7 +250,7 @@
         "gym_escritor solo puede escribir donde indica el §4.3"
       ],
       "estimacion": "S",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null
     },
     {
@@ -278,7 +278,7 @@
         "Si un script SQL falla, se informa el archivo y el error, y el proceso termina con código distinto de 0"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null
     },
     {
@@ -314,8 +314,9 @@
         "Probado en Windows (PowerShell) y en Linux o macOS"
       ],
       "estimacion": "L",
-      "estado": "pendiente",
-      "responsable": null
+      "estado": "en_curso",
+      "responsable": null,
+      "notas": "Implementado y probado por partes en Windows (fases A y B con la base). Falta la corrida completa desde un clon limpio con API key y la prueba en Linux o macOS."
     },
     {
       "id": "T-08",
@@ -354,7 +355,7 @@
         "El socio fijado en app.socio_id no ve filas de otro socio en ninguna vista propia"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null
     },
     {
@@ -383,8 +384,9 @@
         "Ante un 429 simulado se reintenta con espera creciente y un máximo configurable"
       ],
       "estimacion": "S",
-      "estado": "pendiente",
-      "responsable": null
+      "estado": "en_curso",
+      "responsable": null,
+      "notas": "Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
     },
     {
       "id": "T-10",
@@ -423,7 +425,7 @@
         "El administrador de administración central (sede_id NULL) tiene sede_alcance None"
       ],
       "estimacion": "S",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null
     },
     {
@@ -465,7 +467,7 @@
         "Están documentadas las definiciones de membresía vigente, moroso, apto vigente, pago válido y asistencia"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null
     },
     {
@@ -504,7 +506,7 @@
         "Los errores de la base se devuelven como texto para el reintento, sin cortar el proceso"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null
     },
     {
@@ -537,8 +539,9 @@
         "test_ingesta.py verifica el chunking y los metadatos sin llamar a la API"
       ],
       "estimacion": "L",
-      "estado": "pendiente",
-      "responsable": null
+      "estado": "en_curso",
+      "responsable": null,
+      "notas": "Extracción y chunking probados sin API (72 chunks, tabla de DOC-01 §4 intacta). Falta indexar con embeddings reales."
     },
     {
       "id": "T-14",
@@ -576,8 +579,9 @@
         "start.py indexa solo si hace falta"
       ],
       "estimacion": "S",
-      "estado": "pendiente",
-      "responsable": null
+      "estado": "en_curso",
+      "responsable": null,
+      "notas": "Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
     },
     {
       "id": "T-15",
@@ -612,7 +616,7 @@
         "PropuestaCambio incluye antes, despues, efectos, advertencias y errores"
       ],
       "estimacion": "S",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null
     },
     {
@@ -672,7 +676,7 @@
         "Ninguna validación depende del LLM"
       ],
       "estimacion": "L",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null
     },
     {
@@ -710,7 +714,7 @@
         "El módulo no ejecuta ningún SQL que no esté escrito en el código"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null
     },
     {
@@ -768,8 +772,9 @@
         "Cada invocación usa un thread_id nuevo"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
-      "responsable": null
+      "estado": "en_curso",
+      "responsable": null,
+      "notas": "Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
     },
     {
       "id": "T-19",
@@ -828,8 +833,9 @@
         "RespuestaAgente.sql es None para el perfil socio"
       ],
       "estimacion": "L",
-      "estado": "pendiente",
-      "responsable": null
+      "estado": "en_curso",
+      "responsable": null,
+      "notas": "Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
     },
     {
       "id": "T-20",
@@ -871,8 +877,9 @@
         "Las fuentes de la respuesta salen de los metadatos de los fragmentos, no de texto libre del LLM"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
-      "responsable": null
+      "estado": "en_curso",
+      "responsable": null,
+      "notas": "Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
     },
     {
       "id": "T-21",
@@ -906,8 +913,9 @@
         "La traza muestra las dos herramientas ejecutadas en paralelo"
       ],
       "estimacion": "S",
-      "estado": "pendiente",
-      "responsable": null
+      "estado": "en_curso",
+      "responsable": null,
+      "notas": "Fan-in con defer=True probado con LLM simulado (incluido el reintento de SQL). Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
     },
     {
       "id": "T-22",
@@ -977,8 +985,9 @@
         "Si falta un dato, el LLM no lo inventa: la respuesta lista los faltantes (CA-63)"
       ],
       "estimacion": "L",
-      "estado": "pendiente",
-      "responsable": null
+      "estado": "en_curso",
+      "responsable": null,
+      "notas": "Interrupt, confirmar, cancelar, descartar y 'sí' probados con LLM simulado y contra la base. Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
     },
     {
       "id": "T-23",
@@ -1014,7 +1023,7 @@
         "Corren sin red ni Docker"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null
     },
     {
@@ -1048,8 +1057,9 @@
         "Buscar el DNI del usuario en las trazas no devuelve resultados"
       ],
       "estimacion": "S",
-      "estado": "pendiente",
-      "responsable": null
+      "estado": "en_curso",
+      "responsable": null,
+      "notas": "Metadata, tags, @traceable y trace_id implementados. Falta verificar en LangSmith (LANGSMITH_API_KEY)."
     },
     {
       "id": "T-25",
@@ -1087,8 +1097,9 @@
         "Cerrar la sesión vuelve a la pantalla de ingreso y limpia el estado"
       ],
       "estimacion": "S",
-      "estado": "pendiente",
-      "responsable": null
+      "estado": "en_curso",
+      "responsable": null,
+      "notas": "Ingreso, sesión y cierre probados con streamlit AppTest (CA-80, CA-81, CA-86). Falta abrirla con python start.py."
     },
     {
       "id": "T-26",
@@ -1125,8 +1136,9 @@
         "Los errores del agente se muestran como mensaje comprensible, sin traceback"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
-      "responsable": null
+      "estado": "en_curso",
+      "responsable": null,
+      "notas": "Chat, detalle, tablas y ejemplos probados con AppTest y LLM simulado (CA-82 a CA-84). Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
     },
     {
       "id": "T-27",
@@ -1160,8 +1172,9 @@
         "Recargar la página no reejecuta una operación ya confirmada"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
-      "responsable": null
+      "estado": "en_curso",
+      "responsable": null,
+      "notas": "Tarjeta, Confirmar, Cancelar y descarte probados con AppTest contra la base (CA-50, CA-55 a CA-57). Código y tests con LLM simulado listos; falta la verificación con Gemini real (GOOGLE_API_KEY)."
     },
     {
       "id": "T-28",
@@ -1242,7 +1255,7 @@
         "Los casos con fechas relativas tienen depende_fecha: true y valido_hasta"
       ],
       "estimacion": "L",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null
     },
     {
@@ -1279,8 +1292,9 @@
         "El hash de socio y membresia se verifica en todos los casos sin confirmación"
       ],
       "estimacion": "L",
-      "estado": "pendiente",
-      "responsable": null
+      "estado": "en_curso",
+      "responsable": null,
+      "notas": "Evaluadores y runner listos y probados con LLM simulado. Falta la corrida real."
     },
     {
       "id": "T-30",
@@ -1314,7 +1328,8 @@
       ],
       "estimacion": "L",
       "estado": "pendiente",
-      "responsable": null
+      "responsable": null,
+      "notas": "Requiere GOOGLE_API_KEY."
     },
     {
       "id": "T-31",
@@ -1343,8 +1358,9 @@
         "`pytest` pasa completo"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
-      "responsable": null
+      "estado": "en_curso",
+      "responsable": null,
+      "notas": "README completo; falta la verificación de reproducibilidad en un clon limpio."
     },
     {
       "id": "T-32",
@@ -1368,7 +1384,8 @@
       ],
       "estimacion": "L",
       "estado": "pendiente",
-      "responsable": null
+      "responsable": null,
+      "notas": "Fuera del alcance de esta implementación por decisión del responsable: se hace al final con las capturas reales."
     },
     {
       "id": "T-33",

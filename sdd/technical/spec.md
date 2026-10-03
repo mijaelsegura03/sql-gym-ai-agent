@@ -2,8 +2,8 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 0.3 |
-| Estado | Listo para dividir en tasks |
+| Versión | 0.4 |
+| Estado | Implementado (ajustes de implementación registrados en el historial) |
 | Fecha | 2026-10-03 |
 | Spec funcional de referencia | `sdd/functional/spec.md` v0.4 |
 | Siguiente artefacto | `sdd/tasks.json` |
@@ -165,13 +165,19 @@ Orden de ejecución sobre `gimnasio_template`, con psycopg y el superusuario:
 |---|---|---|---|
 | `gym_lector_admin` | Lectura del perfil Administrador; `auth.py` | `SELECT` sobre todas las tablas de `public` y sobre `agente.auditoria` | `default_transaction_read_only = on`, `statement_timeout = 5s` |
 | `gym_lector_socio` | Lectura del perfil Socio | `USAGE` sobre `socio_api` y `SELECT` sobre sus vistas. **Sin acceso a `public`.** | Ídem |
-| `gym_escritor` | Solo `app/ops/ejecucion.py` | `SELECT` sobre las tablas necesarias para validar; `INSERT` y `UPDATE` sobre `socio`; `UPDATE (estado)` sobre `membresia`; `INSERT` sobre `agente.auditoria`. **Sin `DELETE` en ninguna tabla.** | `statement_timeout = 5s` |
+| `gym_escritor` | Solo `app/ops/ejecucion.py` | `SELECT` sobre las tablas necesarias para validar; `INSERT` y `UPDATE` sobre `socio`; `UPDATE (estado)` sobre `membresia`; `INSERT` sobre `agente.auditoria` (sin `SELECT`: la auditoría se inserta sin `RETURNING`). **Sin `DELETE` en ninguna tabla.** | `statement_timeout = 5s` |
+
+Se revoca todo permiso de `PUBLIC` sobre los esquemas `public`, `socio_api` y `agente`. La extensión `unaccent`
+(para comparar nombres sin acentos) se instala en un esquema propio `ext`, con `USAGE` para los tres roles y en
+el `search_path` de los lectores (`public, ext` y `socio_api, ext`), así el socio la puede usar sin tener acceso a
+`public`. Todas las conexiones fijan `TimeZone = America/Argentina/Buenos_Aires`.
 
 El LLM **nunca** recibe una herramienta que ejecute SQL libre con `gym_escritor`.
 
 ### 4.4 Esquema `socio_api` (vistas del perfil Socio)
 
-Las vistas propias filtran por `current_setting('app.socio_id')::bigint`. La aplicación fija ese
+Las vistas propias filtran por `socio_api.socio_sesion()`, que devuelve `current_setting('app.socio_id', true)::bigint`
+(o `NULL` si no se fijó, y entonces las vistas vuelven vacías). La aplicación fija ese
 valor con `set_config('app.socio_id', <id de la sesión>, true)` dentro de la transacción, **antes**
 de ejecutar la SQL generada. La SQL generada no puede cambiarlo, porque el validador rechaza
 cualquier función fuera de una lista permitida, y `set_config` no está en ella (§6.2).
@@ -184,7 +190,7 @@ de ellas sin tener permisos sobre las tablas de base. El rol `gym_lector_socio` 
 |---|---|---|
 | `sede`, `sala`, `actividad`, `plan`, `plan_actividad`, `ejercicio` | Copia directa de la tabla | Pública |
 | `clase` | Grilla con `instructor_nombre` (nombre y apellido; sin email, DNI ni rol) | Pública |
-| `sesion_clase` | Sesiones con `instructor_nombre` del reemplazo | Pública |
+| `sesion_clase` | Sesiones con `instructor_nombre` (el del reemplazo si lo hubo, si no el titular) y `con_reemplazo` | Pública |
 | `ocupacion_sesion` | `sesion_id`, `cupo`, `confirmadas`, `en_lista_espera`, `lugares_disponibles` (agregado, sin identidades) | Pública (RF-54) |
 | `mi_socio` | La fila del socio de la sesión | Propia |
 | `mis_aptos`, `mis_membresias`, `mis_reservas`, `mis_accesos`, `mis_rutinas`, `mis_rutina_ejercicios` | Filas del socio de la sesión | Propia |
@@ -222,7 +228,10 @@ columnas al esquema del punto 1.
   más viejas y la emisión de aptos pueden ser anteriores (DC-07 no lo restringe).
 - Se mantiene `setseed(0.42)`: con la semilla y las fechas fijas, **cada carga genera exactamente los
   mismos datos**, y los resultados esperados de la evaluación son estables.
-- Se verifica que existan los casos que piden los criterios de aceptación (§9.4).
+- Se verifica que existan los casos que piden los criterios de aceptación (§9.4). Para CA-58 se agregó una regla
+  determinística: los morosos con `id % 4 = 1` tienen una renovación con demora `pendiente` (Full Mensual desde el
+  día anterior a la fecha base, con un pago por transferencia pendiente), sin ninguna membresía activa.
+- `LOCALTIMESTAMP` se reemplaza por la fecha base a las 12:00.
 - El encabezado del script se actualiza para describir las fechas fijas.
 
 ### 4.7 Semántica derivada que usa el agente
@@ -272,6 +281,11 @@ class EstadoAgente(TypedDict):
     herramientas: Annotated[list[str], operator.add]   # "consulta_sql", "busqueda_documentos", "operacion_socio"
     respuesta: str | None
     fuentes: list[str]
+    # Agregados en la implementación:
+    trace_id: str | None                  # run_id de la traza raíz, para la auditoría
+    ejecucion: ResultadoEjecucion | None
+    nodos: Annotated[list[str], operator.add]   # recorrido, para el detalle y los tests
+    ruta_final: str | None
 ```
 
 El DNI del usuario **no** forma parte del estado; solo su `id` y su seudónimo (RF-71).
@@ -312,7 +326,10 @@ START → clasificar ─┬─ directa | fuera_dominio | necesita_contexto ─�
   (RNF-01). Aunque el LLM clasifique un mensaje de un socio como `escritura`, el socio no llega
   nunca a `extraer_operacion`.
 - La ruta `hibrida` usa *fan-out* de LangGraph: la rama SQL y la de documentos corren en paralelo y
-  `sintetizar` espera a las dos.
+  `sintetizar` espera a las dos. Como la rama SQL puede reintentar (y tener más pasos que la de documentos),
+  `sintetizar` se registra como nodo diferido (`defer=True`): corre una sola vez, cuando no quedan otras tareas.
+- `responder_directo` también atiende la ruta `necesita_contexto`. `rechazar_permiso` conserva la ruta que eligió
+  el clasificador (por ejemplo `datos` o `escritura`), así la exactitud de ruteo se mide igual en esos casos.
 - `rechazar_permiso` por información interna es una primera barrera. La barrera real es la base:
   aunque el clasificador no lo detecte, el rol `gym_lector_socio` no puede leer datos de otros
   socios, la consulta falla o vuelve vacía y `sintetizar` responde que no hay información
@@ -372,7 +389,18 @@ class RespuestaAgente(BaseModel):
     propuesta: PropuestaCambio | None
     thread_id: str
     trace_id: str | None
+    # Agregados en la implementación:
+    idioma: str
+    propuesta_pendiente: bool        # el grafo quedó esperando Confirmar/Cancelar
+    resultado_operacion: ResultadoEjecucion | None
+    nodos: list[str]
+    duracion_seg: float | None
+    error: bool
 ```
+
+Funciones de entrada (`app/agent/grafo.py`): `responder(usuario, mensaje)`, `reanudar(usuario, thread_id,
+decision)` (solo si el hilo tiene una propuesta pendiente del mismo usuario; si no, no ejecuta nada, lo que evita
+reejecutar al recargar la página) y `descartar(usuario, thread_id)`.
 
 La tabla de la interfaz se arma con `filas`, no con el texto del LLM (RF-03, RF-64).
 
@@ -445,11 +473,16 @@ class AltaSocio(BaseModel):
     email: str | None; telefono: str | None
     sede: str | None
 
+class CambiosSocio(BaseModel):     # todos opcionales: solo se completan los que se piden cambiar
+    nombre, apellido, email, telefono: str | None
+    fecha_nacimiento: date | None
+    contacto_emergencia, sede_principal: str | None
+    dni: str | None                  # solo para detectar el pedido de cambiar el DNI (no permitido)
+
 class ModificacionSocio(BaseModel):
     tipo: Literal["modificacion_socio"]
     socio: ReferenciaSocio
-    cambios: dict[Literal["nombre", "apellido", "email", "telefono",
-                          "fecha_nacimiento", "contacto_emergencia", "sede_principal"], str]
+    cambios: CambiosSocio
 
 class Suspension(BaseModel):   tipo: Literal["suspension"];   socio: ReferenciaSocio; motivo: str | None
 class Reactivacion(BaseModel): tipo: Literal["reactivacion"]; socio: ReferenciaSocio
@@ -464,8 +497,13 @@ OperacionSocio = Annotated[AltaSocio | ModificacionSocio | Suspension | Reactiva
                            | FueraDeCatalogo, Field(discriminator="tipo")]
 ```
 
-Los campos son opcionales **a propósito**: si falta un dato, el LLM no lo inventa, lo deja vacío
-y la validación lo informa (RF-45). El prompt lo indica explícitamente.
+Los campos son opcionales **a propósito** (también los de `ContactoEmergencia`): si falta un dato, el LLM no lo
+inventa, lo deja vacío y la validación lo informa (RF-45). El prompt lo indica explícitamente. `cambios` es un
+modelo con campos opcionales en lugar de un `dict` porque la salida estructurada de Gemini no admite diccionarios
+con claves libres. La salida del LLM se envuelve en `ExtraccionOperacion(operacion: OperacionSocio)`.
+
+Los errores y advertencias de la validación son `Aviso(codigo, params)`; el texto en castellano o inglés lo arman
+las plantillas de `app/ops/mensajes.py` (nodo `responder_operacion`), sin pasar por el LLM.
 
 ### 7.2 Validaciones (`app/ops/validacion.py`)
 
@@ -480,14 +518,14 @@ Todas son código Python con consultas parametrizadas; ninguna depende del LLM.
 | DNI: 7 u 8 dígitos y no repetido | OP-01 | Error |
 | Email con formato válido y no repetido | OP-01, OP-02 | Error |
 | Edad: ≥ 16 años con la fecha real | OP-01, OP-02 | Error si es menor de 16; **advertencia** si tiene 16 o 17 (autorización) |
-| Sede: la del administrador; obligatoria si el administrador no tiene sede; debe existir y estar activa | OP-01, OP-02 | Error |
+| Sede: la del administrador; obligatoria si el administrador no tiene sede; debe existir y estar activa. Un administrador con sede no puede dar de alta en otra sede | OP-01, OP-02 | Error |
 | El cambio de sede deja al socio fuera del alcance del administrador | OP-02 | Advertencia |
 | Cambio de sede | OP-02 | Advertencia: una vez por período de membresía (DOC-01 §5) |
 | DNI no modificable | OP-02 | Error |
 | Estado de origen: suspensión ← `activo`; reactivación ← `suspendido` o `baja`; baja ← `activo` o `suspendido` | OP-03 a OP-05 | Error |
 | Motivo obligatorio | OP-03, OP-05 | Error |
 | Baja con una membresía `activa` o `congelada` y `fecha_fin >= hoy` | OP-05 | Error con la fecha de fin (DC-05) |
-| Membresía `pendiente` | OP-05 | Efecto secundario: pasa a `cancelada` (advertencia) |
+| Membresía `pendiente` con `fecha_fin >= hoy` | OP-05 | Efecto secundario: pasa a `cancelada` (advertencia) |
 | Membresías `activa`, `congelada` o `pendiente` con `fecha_fin >= hoy` | OP-03 | Efecto secundario: pasan a `cancelada`, más la advertencia de reintegro parcial (DOC-01 §7, DOC-02 §11) (DT-03) |
 | Reactivación | OP-04 | Advertencia: necesita una membresía nueva; no se cobra reingreso |
 | Alta | OP-01 | Advertencia: necesita membresía y apto médico para ingresar |
@@ -605,11 +643,15 @@ los fragmentos citados, no con texto libre del LLM (RF-10, RF-19).
 
 1. `reset_db.py` (base de trabajo limpia desde la plantilla).
 2. Sube o actualiza `casos.yaml` como dataset de LangSmith (`gimnasio-eval`).
-3. Ejecuta `langsmith.evaluate()` sobre una función objetivo que identifica al usuario, invoca el
-   grafo y, si el caso lo pide, reanuda con la acción indicada.
-4. Primero corren los casos de lectura y después los de escritura. Antes de **cada** caso de
+3. Ejecuta, en orden y en el mismo proceso, una función objetivo que identifica al usuario, invoca el grafo y,
+   si el caso lo pide, reanuda con la acción indicada; calcula los hashes de `socio` y `membresia` y corre las
+   consultas de verificación. Las trazas de cada caso van a LangSmith. Después registra la corrida con
+   `langsmith.evaluate()` sobre el dataset, con las salidas y las métricas ya calculadas (así el orden y la
+   restauración de la base no dependen de cómo `evaluate()` recorre los ejemplos).
+4. Primero corren los casos de lectura y después los de escritura. Antes y después de **cada** caso de
    escritura se restaura la base desde la plantilla (RF-74).
-5. Se respeta `EVAL_RPM` entre casos.
+5. `EVAL_RPM` limita los requests por minuto a Gemini (un limitador global en `app/llm.py` que solo activa la
+   evaluación). Los casos con `valido_hasta` vencido se omiten y se informan en el reporte.
 6. Cada corrida queda como un *experiment* de LangSmith (RF-75) y además genera
    `eval/resultados/<fecha>_<commit>.md` con la tabla de métricas y el detalle por caso (RF-77).
 
@@ -770,6 +812,11 @@ El grafo se compila una sola vez con `@st.cache_resource`.
 | `test_ingesta.py` | Chunking por sección, metadatos, tablas convertidas a Markdown | — |
 | `test_grafo_rutas.py` | Con el LLM simulado: cada ruta recorre los nodos esperados; con perfil socio nunca se llega a `extraer_operacion` | — |
 | `test_datos.py` | Los casos necesarios de los datos (§9.4) | Docker |
+| `test_catalogos.py` | Los catálogos cubren todas las tablas o vistas y sus ejemplos se ejecutan con el rol del perfil | Docker |
+| `test_ui.py` | Interfaz con `streamlit.testing.AppTest` y LLM simulado: ingreso, detalle, tarjeta, Confirmar, Cancelar y descarte | Docker |
+| `test_evaluacion.py` | Comparación de valores, evaluadores y runner de escritura con LLM simulado | Docker (parcial) |
+
+Los tests que llaman a Gemini se marcan con `@pytest.mark.llm` y no corren por defecto.
 
 Los tests que requieren Docker se marcan con `@pytest.mark.db`.
 
@@ -813,3 +860,4 @@ Los tests que requieren Docker se marcan con `@pytest.mark.db`.
 | 0.1 | 2026-10-03 | Borrador inicial: Gemini, LangGraph, Streamlit, LangSmith, Chroma y Postgres en Docker con arranque por `scripts/start.py`. |
 | 0.2 | 2026-10-03 | Se cierran DT-01 (fecha base 16/10/2026) y DT-03 (la suspensión cancela las membresías activa, congelada y pendiente). |
 | 0.3 | 2026-10-03 | §10: arranque totalmente automatizado con `start.py` en la raíz (entorno virtual, `.env` con secretos generados, pedido de API keys, inicio de Docker, puerto libre, `--wait`, DNI de ejemplo y `--evaluar`). |
+| 0.4 | 2026-10-03 | Ajustes de implementación: extensión `unaccent` en el esquema `ext`, zona horaria fija en las conexiones y auditoría sin `RETURNING` (§4.3); función `socio_api.socio_sesion()` y columna `con_reemplazo` (§4.4); regla de datos para CA-58 (§4.6); claves extra del estado y de `RespuestaAgente` y funciones de entrada (§5.1, §5.6); `sintetizar` diferido y ruta conservada en el rechazo por permisos (§5.3); `CambiosSocio` en lugar de `dict` y avisos con plantillas es/en (§7.1); precisiones de sede y membresía pendiente (§7.2); runner de evaluación local con registro posterior en LangSmith y `EVAL_RPM` como límite de requests a Gemini (§9.3); tests adicionales (§12). |
