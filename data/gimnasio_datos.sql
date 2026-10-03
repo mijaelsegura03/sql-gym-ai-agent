@@ -19,15 +19,25 @@
 --       - solo reservan clases socios cuyo plan habilita esa actividad, en su
 --         sede (o con plan multisede), respetando clases_por_semana.
 --       - hay listas de espera en las clases más concurridas.
---   * Las fechas son relativas a CURRENT_DATE: los datos siempre quedan
---     "frescos" (membresías vigentes, clases de las últimas 6 semanas y de
---     la próxima semana, accesos de los últimos 60 días).
---   * setseed() fija la semilla: mismos datos cada vez que se ejecuta el
---     script el mismo día.
+--   * FECHAS FIJAS (spec funcional DC-07, spec técnico §4.6): todas las fechas
+--     se calculan respecto de una fecha base fija, el 16/10/2026, guardada en
+--     el parámetro de sesión gym.fecha_base (ver set_config más abajo). El
+--     "ahora" de la carga es la fecha base a las 12:00. No se usa la fecha del
+--     sistema en ningún lado, así que los datos no dependen del día de carga:
+--     membresías vigentes al 16/10, clases de las 6 semanas anteriores y de la
+--     semana siguiente (hasta el 23/10) y accesos de los 60 días anteriores.
+--   * setseed() fija la semilla: con la semilla y la fecha base fijas, cada
+--     ejecución genera exactamente los mismos datos.
+--   * Casos que necesitan los criterios de aceptación del agente (D-01):
+--     algunos morosos tienen una renovación con demora pendiente de pago
+--     (membresía 'pendiente' sin ninguna activa), ver sección 6.
 --
 --  ATENCIÓN: el TRUNCATE de abajo borra TODO el contenido de las tablas
 --  (y reinicia los ids) para que el script sea re-ejecutable.
 -- =====================================================================
+
+-- Fecha base de los datos (DT-01). Para moverla, cambiar solo este valor.
+SELECT set_config('gym.fecha_base', '2026-10-16', false);
 
 BEGIN;
 
@@ -165,12 +175,12 @@ SELECT
        ELSE translate(lower(nombre), 'áéíóúüñ', 'aeiouun') || '.' ||
             translate(lower(apellido), 'áéíóúüñ', 'aeiouun') || i || '@example.com' END,
   '+54 9 341 ' || (4000000 + (i * 48271) % 5000000)::text,
-  CURRENT_DATE - (16 * 365 + floor(r_nac * 46 * 365)::int),
+  current_setting('gym.fecha_base')::date - (16 * 365 + floor(r_nac * 46 * 365)::int),
   CASE WHEN i % 19 = 0 THEN NULL
        ELSE nom_emerg || ' ' || ape_emerg || ' (' || parentesco || ') - +54 9 341 ' ||
             (5000000 + (i * 91) % 4000000)::text END,
   CASE WHEN r_sede < 0.50 THEN 1 WHEN r_sede < 0.80 THEN 2 ELSE 3 END,
-  CURRENT_DATE - (CASE WHEN i % 10 = 0 OR i % 9 = 4
+  current_setting('gym.fecha_base')::date - (CASE WHEN i % 10 = 0 OR i % 9 = 4
                        THEN 160 + floor(r_alta * 260)
                        ELSE floor(r_alta * 420) END)::int,
   CASE WHEN i % 10 = 0 THEN 'baja'
@@ -222,7 +232,7 @@ SELECT socio_id, emision, emision + 365,
             WHEN r_obs < 0.90 THEN 'Apto sin restricciones'
             ELSE 'Apto con control cardiológico anual' END
 FROM r
-WHERE r_ren < 0.85 AND emision <= CURRENT_DATE;
+WHERE r_ren < 0.85 AND emision <= current_setting('gym.fecha_base')::date;
 
 -- =====================================================================
 -- 6) MEMBRESÍAS Y PAGOS
@@ -256,7 +266,7 @@ DECLARE
   v_perfil     TEXT;
   v_planes     INT[];
   v_plan_id    INT;
-  v_hoy        DATE := CURRENT_DATE;
+  v_hoy        DATE := current_setting('gym.fecha_base')::date;
   v_inicio     DATE;
   v_fin        DATE;
   v_ultimo_fin DATE;
@@ -331,7 +341,7 @@ BEGIN
                        ELSE 'mercadopago' END;
       v_ts := LEAST((v_inicio - (random() * 2)::int)::timestamp
                       + make_interval(hours => 9 + (random() * 11)::int, mins => (random() * 59)::int),
-                    LOCALTIMESTAMP - interval '5 minutes');
+                    (current_setting('gym.fecha_base')::date + TIME '12:00') - interval '5 minutes');
 
       -- ~6% de los pagos electrónicos tuvo un intento rechazado antes
       IF v_metodo IN ('credito', 'debito', 'mercadopago') AND random() < 0.06 THEN
@@ -374,7 +384,19 @@ BEGIN
       VALUES (v_s.id, v_plan.id, v_ultimo_fin + 1, v_ultimo_fin + v_plan.duracion_dias,
               v_plan.precio, 'pendiente')
       RETURNING id INTO v_mid;
-      PERFORM pg_temp.nuevo_pago(v_mid, v_plan.precio, LOCALTIMESTAMP, 'transferencia', 'pendiente');
+      PERFORM pg_temp.nuevo_pago(v_mid, v_plan.precio, (current_setting('gym.fecha_base')::date + TIME '12:00'), 'transferencia', 'pendiente');
+    END IF;
+
+    -- Renovación con demora pendiente de pago para algunos morosos (id % 4 = 1):
+    -- contrataron ayer por transferencia y el pago todavía no se acreditó, así que su
+    -- única membresía en curso está 'pendiente' (caso CA-58 del spec funcional).
+    IF v_perfil = 'moroso' AND v_s.id % 4 = 1 AND v_ultimo_fin IS NOT NULL THEN
+      SELECT * INTO v_plan FROM plan WHERE id = 3;
+      INSERT INTO membresia (socio_id, plan_id, fecha_inicio, fecha_fin, precio_pactado, estado)
+      VALUES (v_s.id, v_plan.id, v_hoy - 1, v_hoy - 1 + v_plan.duracion_dias - 1,
+              v_plan.precio, 'pendiente')
+      RETURNING id INTO v_mid;
+      PERFORM pg_temp.nuevo_pago(v_mid, v_plan.precio, (v_hoy - 1) + TIME '18:30', 'transferencia', 'pendiente');
     END IF;
 
   END LOOP;
@@ -388,43 +410,43 @@ DROP FUNCTION pg_temp.nuevo_pago(BIGINT, NUMERIC, TIMESTAMP, TEXT, TEXT);
 -- =====================================================================
 INSERT INTO clase (actividad_id, sala_id, instructor_id, dia_semana, hora_inicio, duracion_min, cupo, vigente_desde, vigente_hasta) VALUES
 -- Sede Centro
-(1, 1, 1, 1, '19:00', 45, 12, CURRENT_DATE - 365, NULL),   --  1 Spinning lun
-(1, 1, 1, 3, '19:00', 45, 12, CURRENT_DATE - 365, NULL),   --  2 Spinning mié
-(1, 1, 1, 5, '08:00', 45, 12, CURRENT_DATE - 365, NULL),   --  3 Spinning vie
-(2, 2, 2, 2, '18:30', 60, 25, CURRENT_DATE - 365, NULL),   --  4 Yoga mar
-(2, 2, 2, 4, '18:30', 60, 25, CURRENT_DATE - 365, NULL),   --  5 Yoga jue
-(4, 2, 2, 1, '10:00', 55, 15, CURRENT_DATE - 365, NULL),   --  6 Pilates lun
-(3, 3, 3, 1, '20:00', 50, 18, CURRENT_DATE - 365, NULL),   --  7 Funcional lun
-(3, 3, 3, 3, '20:00', 50, 18, CURRENT_DATE - 365, NULL),   --  8 Funcional mié
-(6, 3, 3, 2, '07:30', 60, 15, CURRENT_DATE - 365, NULL),   --  9 Crossfit mar
-(5, 2, 9, 3, '19:30', 60, 28, CURRENT_DATE - 365, NULL),   -- 10 Zumba mié
-(5, 2, 9, 6, '10:30', 60, 28, CURRENT_DATE - 365, NULL),   -- 11 Zumba sáb
-(9, 3, 9, 5, '19:00', 45, 18, CURRENT_DATE - 365, NULL),   -- 12 GAP vie
-(8, 3, 3, 4, '20:00', 60, 15, CURRENT_DATE - 300, CURRENT_DATE - 35),  -- 13 Boxeo jue (discontinuada)
+(1, 1, 1, 1, '19:00', 45, 12, current_setting('gym.fecha_base')::date - 365, NULL),   --  1 Spinning lun
+(1, 1, 1, 3, '19:00', 45, 12, current_setting('gym.fecha_base')::date - 365, NULL),   --  2 Spinning mié
+(1, 1, 1, 5, '08:00', 45, 12, current_setting('gym.fecha_base')::date - 365, NULL),   --  3 Spinning vie
+(2, 2, 2, 2, '18:30', 60, 25, current_setting('gym.fecha_base')::date - 365, NULL),   --  4 Yoga mar
+(2, 2, 2, 4, '18:30', 60, 25, current_setting('gym.fecha_base')::date - 365, NULL),   --  5 Yoga jue
+(4, 2, 2, 1, '10:00', 55, 15, current_setting('gym.fecha_base')::date - 365, NULL),   --  6 Pilates lun
+(3, 3, 3, 1, '20:00', 50, 18, current_setting('gym.fecha_base')::date - 365, NULL),   --  7 Funcional lun
+(3, 3, 3, 3, '20:00', 50, 18, current_setting('gym.fecha_base')::date - 365, NULL),   --  8 Funcional mié
+(6, 3, 3, 2, '07:30', 60, 15, current_setting('gym.fecha_base')::date - 365, NULL),   --  9 Crossfit mar
+(5, 2, 9, 3, '19:30', 60, 28, current_setting('gym.fecha_base')::date - 365, NULL),   -- 10 Zumba mié
+(5, 2, 9, 6, '10:30', 60, 28, current_setting('gym.fecha_base')::date - 365, NULL),   -- 11 Zumba sáb
+(9, 3, 9, 5, '19:00', 45, 18, current_setting('gym.fecha_base')::date - 365, NULL),   -- 12 GAP vie
+(8, 3, 3, 4, '20:00', 60, 15, current_setting('gym.fecha_base')::date - 300, current_setting('gym.fecha_base')::date - 35),  -- 13 Boxeo jue (discontinuada)
 -- Sede Norte
-(1, 4, 4, 2, '19:00', 45, 8, CURRENT_DATE - 365, NULL),    -- 14 Spinning mar
-(1, 4, 4, 4, '19:00', 45, 8, CURRENT_DATE - 365, NULL),    -- 15 Spinning jue
-(1, 4, 4, 6, '09:30', 45, 8, CURRENT_DATE - 365, NULL),    -- 16 Spinning sáb
-(5, 5, 4, 1, '19:30', 60, 22, CURRENT_DATE - 365, NULL),   -- 17 Zumba lun
-(10, 6, 5, 1, '07:00', 40, 16, CURRENT_DATE - 365, NULL),  -- 18 HIIT lun
-(10, 6, 5, 3, '07:00', 40, 16, CURRENT_DATE - 365, NULL),  -- 19 HIIT mié
-(3, 6, 5, 2, '20:00', 50, 16, CURRENT_DATE - 365, NULL),   -- 20 Funcional mar
-(8, 6, 5, 5, '19:30', 60, 14, CURRENT_DATE - 365, NULL),   -- 21 Boxeo vie
-(2, 5, 6, 3, '18:30', 60, 22, CURRENT_DATE - 365, NULL),   -- 22 Yoga mié
-(4, 5, 6, 5, '10:00', 55, 15, CURRENT_DATE - 365, NULL),   -- 23 Pilates vie
-(7, 5, 6, 2, '12:30', 40, 20, CURRENT_DATE - 365, NULL),   -- 24 Stretching mar
+(1, 4, 4, 2, '19:00', 45, 8, current_setting('gym.fecha_base')::date - 365, NULL),    -- 14 Spinning mar
+(1, 4, 4, 4, '19:00', 45, 8, current_setting('gym.fecha_base')::date - 365, NULL),    -- 15 Spinning jue
+(1, 4, 4, 6, '09:30', 45, 8, current_setting('gym.fecha_base')::date - 365, NULL),    -- 16 Spinning sáb
+(5, 5, 4, 1, '19:30', 60, 22, current_setting('gym.fecha_base')::date - 365, NULL),   -- 17 Zumba lun
+(10, 6, 5, 1, '07:00', 40, 16, current_setting('gym.fecha_base')::date - 365, NULL),  -- 18 HIIT lun
+(10, 6, 5, 3, '07:00', 40, 16, current_setting('gym.fecha_base')::date - 365, NULL),  -- 19 HIIT mié
+(3, 6, 5, 2, '20:00', 50, 16, current_setting('gym.fecha_base')::date - 365, NULL),   -- 20 Funcional mar
+(8, 6, 5, 5, '19:30', 60, 14, current_setting('gym.fecha_base')::date - 365, NULL),   -- 21 Boxeo vie
+(2, 5, 6, 3, '18:30', 60, 22, current_setting('gym.fecha_base')::date - 365, NULL),   -- 22 Yoga mié
+(4, 5, 6, 5, '10:00', 55, 15, current_setting('gym.fecha_base')::date - 365, NULL),   -- 23 Pilates vie
+(7, 5, 6, 2, '12:30', 40, 20, current_setting('gym.fecha_base')::date - 365, NULL),   -- 24 Stretching mar
 -- Sede Sur
-(3, 8, 7, 1, '19:00', 50, 15, CURRENT_DATE - 365, NULL),   -- 25 Funcional lun
-(3, 8, 7, 4, '19:00', 50, 15, CURRENT_DATE - 365, NULL),   -- 26 Funcional jue
-(6, 8, 7, 6, '10:00', 60, 12, CURRENT_DATE - 365, NULL),   -- 27 Crossfit sáb
-(2, 7, 8, 2, '19:00', 60, 18, CURRENT_DATE - 365, NULL),   -- 28 Yoga mar
-(5, 7, 8, 4, '20:00', 60, 20, CURRENT_DATE - 365, NULL),   -- 29 Zumba jue
-(9, 7, 8, 3, '19:00', 45, 18, CURRENT_DATE - 365, NULL),   -- 30 GAP mié
-(4, 7, 10, 1, '18:00', 55, 15, CURRENT_DATE - 365, NULL),  -- 31 Pilates lun
-(7, 7, 10, 5, '18:30', 40, 18, CURRENT_DATE - 365, NULL),  -- 32 Stretching vie
-(4, 7, 10, 6, '09:00', 55, 15, CURRENT_DATE - 365, NULL),  -- 33 Pilates sáb
+(3, 8, 7, 1, '19:00', 50, 15, current_setting('gym.fecha_base')::date - 365, NULL),   -- 25 Funcional lun
+(3, 8, 7, 4, '19:00', 50, 15, current_setting('gym.fecha_base')::date - 365, NULL),   -- 26 Funcional jue
+(6, 8, 7, 6, '10:00', 60, 12, current_setting('gym.fecha_base')::date - 365, NULL),   -- 27 Crossfit sáb
+(2, 7, 8, 2, '19:00', 60, 18, current_setting('gym.fecha_base')::date - 365, NULL),   -- 28 Yoga mar
+(5, 7, 8, 4, '20:00', 60, 20, current_setting('gym.fecha_base')::date - 365, NULL),   -- 29 Zumba jue
+(9, 7, 8, 3, '19:00', 45, 18, current_setting('gym.fecha_base')::date - 365, NULL),   -- 30 GAP mié
+(4, 7, 10, 1, '18:00', 55, 15, current_setting('gym.fecha_base')::date - 365, NULL),  -- 31 Pilates lun
+(7, 7, 10, 5, '18:30', 40, 18, current_setting('gym.fecha_base')::date - 365, NULL),  -- 32 Stretching vie
+(4, 7, 10, 6, '09:00', 55, 15, current_setting('gym.fecha_base')::date - 365, NULL),  -- 33 Pilates sáb
 -- Clase nueva (arrancó hace 4 semanas)
-(10, 3, 1, 6, '09:00', 40, 16, CURRENT_DATE - 28, NULL);   -- 34 HIIT sáb
+(10, 3, 1, 6, '09:00', 40, 16, current_setting('gym.fecha_base')::date - 28, NULL);   -- 34 HIIT sáb
 
 -- =====================================================================
 -- 8) SESIONES DE CLASE: últimas 6 semanas + próxima semana
@@ -434,10 +456,10 @@ WITH cand AS (
   SELECT c.id AS clase_id, c.instructor_id, c.hora_inicio, c.duracion_min, f.fecha,
          random() AS r_rep, random() AS r_can
   FROM clase c
-  CROSS JOIN LATERAL (SELECT CURRENT_DATE - 42 + k AS fecha FROM generate_series(0, 49) AS k) f
+  CROSS JOIN LATERAL (SELECT current_setting('gym.fecha_base')::date - 42 + k AS fecha FROM generate_series(0, 49) AS k) f
   WHERE EXTRACT(ISODOW FROM f.fecha) = c.dia_semana
     AND f.fecha >= c.vigente_desde
-    AND f.fecha <= COALESCE(c.vigente_hasta, CURRENT_DATE + 7)
+    AND f.fecha <= COALESCE(c.vigente_hasta, current_setting('gym.fecha_base')::date + 7)
 )
 INSERT INTO sesion_clase (clase_id, fecha, instructor_id, estado)
 SELECT cand.clase_id, cand.fecha,
@@ -449,9 +471,9 @@ SELECT cand.clase_id, cand.fecha,
           ORDER BY random() LIMIT 1)
        END,
        CASE WHEN r_can < 0.04 THEN 'cancelada'
-            WHEN cand.fecha < CURRENT_DATE THEN 'realizada'
-            WHEN cand.fecha = CURRENT_DATE
-                 AND (cand.fecha + cand.hora_inicio + cand.duracion_min * interval '1 minute') < LOCALTIMESTAMP
+            WHEN cand.fecha < current_setting('gym.fecha_base')::date THEN 'realizada'
+            WHEN cand.fecha = current_setting('gym.fecha_base')::date
+                 AND (cand.fecha + cand.hora_inicio + cand.duracion_min * interval '1 minute') < (current_setting('gym.fecha_base')::date + TIME '12:00')
                  THEN 'realizada'
             ELSE 'programada' END
 FROM cand
@@ -505,7 +527,7 @@ resultado AS (
 INSERT INTO reserva (sesion_id, socio_id, creada_en, estado, asistio)
 SELECT sesion_id, socio_id,
        LEAST(fecha + hora_inicio - (1 + r_cre * 71) * interval '1 hour',
-             LOCALTIMESTAMP - interval '10 minutes'),
+             (current_setting('gym.fecha_base')::date + TIME '12:00') - interval '10 minutes'),
        CASE WHEN rn_ses > cupo THEN 'lista_espera'
             WHEN r_can < 0.08  THEN 'cancelada'
             ELSE 'confirmada' END,
@@ -527,7 +549,7 @@ WITH dias AS (
          random() AS r_vis, random() AS r_hora, random() AS r_min, random() AS r_dur,
          random() AS r_met, random() AS r_sede, random() AS r_sede2, random() AS r_out
   FROM socio s
-  CROSS JOIN LATERAL (SELECT CURRENT_DATE - 59 + n AS dia FROM generate_series(0, 59) AS n) d
+  CROSS JOIN LATERAL (SELECT current_setting('gym.fecha_base')::date - 59 + n AS dia FROM generate_series(0, 59) AS n) d
   WHERE d.dia >= s.fecha_alta
 ),
 eval AS (
@@ -573,7 +595,7 @@ SELECT socio_id,
             ELSE sede_principal_id END,
        ts_ingreso,
        CASE WHEN permitido AND r_out >= 0.03
-                 AND ts_ingreso + (45 + floor(r_dur * 76)::int) * interval '1 minute' <= LOCALTIMESTAMP
+                 AND ts_ingreso + (45 + floor(r_dur * 76)::int) * interval '1 minute' <= (current_setting('gym.fecha_base')::date + TIME '12:00')
             THEN ts_ingreso + (45 + floor(r_dur * 76)::int) * interval '1 minute' END,
        CASE WHEN r_met < 0.60 THEN 'qr'
             WHEN r_met < 0.80 THEN 'huella'
@@ -582,7 +604,7 @@ SELECT socio_id,
        permitido,
        motivo
 FROM intentos
-WHERE ts_ingreso <= LOCALTIMESTAMP
+WHERE ts_ingreso <= (current_setting('gym.fecha_base')::date + TIME '12:00')
 ORDER BY ts_ingreso, socio_id;
 
 -- =====================================================================
@@ -639,7 +661,7 @@ WITH base AS (
          random() AS r_ini, random() AS r_obj, random() AS r_ins
   FROM socio so
   JOIN membresia m ON m.socio_id = so.id
-                  AND CURRENT_DATE BETWEEN m.fecha_inicio AND m.fecha_fin
+                  AND current_setting('gym.fecha_base')::date BETWEEN m.fecha_inicio AND m.fecha_fin
                   AND m.estado = 'activa'
   JOIN plan p      ON p.id = m.plan_id AND p.incluye_musculacion
   WHERE so.id % 3 <> 0
@@ -653,7 +675,7 @@ SELECT b.socio_id,
        'Rutina ' || (2 + b.socio_id % 2) || ' días - ' ||
          (ARRAY['Hipertrofia','Pérdida de peso','Tonificación','Resistencia','Fuerza','Rehabilitación','Salud general'])[1 + floor(b.r_obj * 7)::int],
        (ARRAY['Hipertrofia','Pérdida de peso','Tonificación','Resistencia','Fuerza','Rehabilitación','Salud general'])[1 + floor(b.r_obj * 7)::int],
-       GREATEST(b.fecha_alta, CURRENT_DATE - (5 + floor(b.r_ini * 85))::int),
+       GREATEST(b.fecha_alta, current_setting('gym.fecha_base')::date - (5 + floor(b.r_ini * 85))::int),
        NULL,
        TRUE
 FROM base b

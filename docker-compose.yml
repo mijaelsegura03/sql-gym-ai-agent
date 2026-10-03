@@ -1,0 +1,20 @@
+# PostgreSQL 16 del agente (spec técnico §4.1).
+# SIN volumen a propósito (DC-08): cada `docker compose down` + `up` arranca con la base vacía,
+# y start.py / scripts/reset_db.py la vuelven a crear y cargar.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: postgres
+      TZ: America/Argentina/Buenos_Aires
+      PGTZ: America/Argentina/Buenos_Aires
+    ports:
+      - "${DB_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 3s

@@ -1,0 +1,16 @@
+consigna
+
+# Secretos y entorno
+.env
+.venv/
+venv/
+
+# Base vectorial (se regenera con scripts/indexar_pdfs.py)
+.chroma/
+
+# Cachés
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.streamlit/secrets.toml
+.ipynb_checkpoints/
