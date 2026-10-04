@@ -1,0 +1,18 @@
+# Tema de la interfaz (fuera del SDD): minimalista, fondo cálido claro y un único color de acento.
+[theme]
+base = "light"
+primaryColor = "#2E6F6A"            # verde petróleo: botones principales, foco y enlaces
+backgroundColor = "#FAF9F6"
+secondaryBackgroundColor = "#F0EEE9"
+textColor = "#23272B"
+borderColor = "#E2DFD8"
+showWidgetBorder = true
+baseRadius = "small"
+font = "sans-serif"
+
+[theme.sidebar]
+backgroundColor = "#F3F1EC"
+secondaryBackgroundColor = "#E9E6DF"
+
+[client]
+toolbarMode = "minimal"             # oculta el menú de desarrollo de Streamlit

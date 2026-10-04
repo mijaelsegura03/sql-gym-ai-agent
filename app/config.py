@@ -1,7 +1,7 @@
 """Configuración de la aplicación, leída del archivo ``.env`` y de variables de entorno.
 
 Se usa ``pydantic-settings``: cada campo corresponde a una variable de ``.env.example``
-(spec técnico §10.3). Las variables de entorno del proceso tienen prioridad sobre el
+(spec técnico §10). Las variables de entorno del proceso tienen prioridad sobre el
 archivo, lo que permite que ``start.py`` cambie, por ejemplo, ``DB_PORT`` para una
 ejecución puntual.
 
@@ -104,7 +104,7 @@ def configurar_trazas() -> bool:
     """Exporta la configuración de LangSmith a las variables de entorno que leen LangChain y LangGraph.
 
     Si no hay ``LANGSMITH_API_KEY``, desactiva las trazas (la app funciona igual). Devuelve True si
-    las trazas quedan activas (RF-70).
+    las trazas quedan activas.
     """
     import os
 

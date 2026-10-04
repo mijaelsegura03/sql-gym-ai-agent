@@ -1,4 +1,4 @@
-"""Construcción del grafo LangGraph y funciones de entrada del agente (spec técnico §5.3, §5.5, §5.6, §9.1).
+"""Construcción del grafo LangGraph y funciones de entrada del agente (spec técnico §5.3, §5.5, §5.6).
 
 ```
 START → clasificar ─┬─ directa | fuera_dominio | necesita_contexto ─▶ responder_directo ─▶ END
@@ -132,7 +132,7 @@ def _config(usuario: Usuario, thread_id: str, run_id: uuid.UUID) -> dict:
 
 
 def _etiquetar_traza(run_id: uuid.UUID, usuario: Usuario, ruta: str) -> None:
-    """Agrega la ruta como tag de la traza raíz en LangSmith, en segundo plano (§9.1)."""
+    """Agrega la ruta como tag de la traza raíz en LangSmith, en segundo plano."""
     if not get_settings().trazas_activas:
         return
 

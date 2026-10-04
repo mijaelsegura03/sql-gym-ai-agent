@@ -7,7 +7,7 @@ No hay contraseñas: el usuario elige su perfil y escribe su DNI, y el sistema v
 
 El :class:`Usuario` resultante es la única fuente del perfil, la identidad y el alcance de sede
 del agente; nunca se toman del texto del mensaje (RF-55). No guarda el DNI en claro: solo el id
-y un seudónimo HMAC para las trazas (RF-71).
+y un seudónimo HMAC para las trazas.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ class Usuario(BaseModel):
 
 
 def seudonimo(dni: str) -> str:
-    """Seudónimo estable del DNI para las trazas (RF-71): HMAC-SHA256 truncado a 12 caracteres."""
+    """Seudónimo estable del DNI para las trazas: HMAC-SHA256 truncado a 12 caracteres."""
     secreto = get_settings().pseudonimo_secret.encode()
     return hmac.new(secreto, dni.strip().encode(), hashlib.sha256).hexdigest()[:12]
 

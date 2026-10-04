@@ -202,7 +202,7 @@ def texto_propuesta(p: PropuestaCambio, idioma: Idioma) -> str:
 
 
 def filas_comparacion(p: PropuestaCambio, idioma: Idioma) -> list[dict[str, str]]:
-    """Filas campo / antes / después para la tabla de la tarjeta (RF-65)."""
+    """Filas campo / antes / después para la tabla de la tarjeta de la propuesta."""
     en = idioma == "en"
     campos = list(dict.fromkeys([*p.antes.keys(), *p.despues.keys()]))
     return [{("Field" if en else "Campo"): nombre_campo(c, idioma),
@@ -219,7 +219,7 @@ def texto_resultado(r: ResultadoEjecucion, p: PropuestaCambio, idioma: Idioma) -
         motivos = " ".join(texto_aviso(e, idioma) for e in r.errores)
         return (f"**{titulo} not applied** for {socio}. {motivos}" if en
                 else f"**{titulo} no aplicada** para {socio}. {motivos}")
-    lineas = [f"✅ **{titulo} applied** for {socio}." if en else f"✅ **{titulo} realizada** para {socio}."]
+    lineas = [f"**{titulo} applied** for {socio}." if en else f"**{titulo} realizada** para {socio}."]
     lineas += [f"- {texto_aviso(e, idioma)}" for e in p.efectos]
     if p.operacion in ("alta_socio", "reactivacion"):
         codigo = "alta_requiere_membresia_y_apto" if p.operacion == "alta_socio" else "reactivacion_requiere_membresia"

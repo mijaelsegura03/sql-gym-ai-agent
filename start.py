@@ -1,4 +1,4 @@
-"""Arranque completo del agente con un solo comando (spec técnico §10, RNF-07).
+"""Arranque completo del agente con un solo comando (fuera del SDD; ver el README).
 
 Desde un clon recién bajado deja todo funcionando: entorno virtual, configuración,
 contenedor de PostgreSQL, base creada y cargada, PDFs indexados e interfaz abierta.

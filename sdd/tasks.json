@@ -1,10 +1,10 @@
 {
   "proyecto": "sql-gym-ai-agent — Punto 3 de la consigna",
-  "version": "0.4",
-  "fecha": "2026-10-03",
+  "version": "0.5",
+  "fecha": "2026-10-04",
   "specs": {
-    "funcional": "sdd/functional/spec.md v0.4",
-    "tecnico": "sdd/technical/spec.md v0.5"
+    "funcional": "sdd/functional/spec.md v0.5",
+    "tecnico": "sdd/technical/spec.md v0.6"
   },
   "convenciones": {
     "estado": "pendiente | en_curso | hecha | bloqueada",
@@ -12,7 +12,7 @@
     "requisitos": "IDs del spec funcional (RF, RNF, OP, D, R) que la task implementa",
     "criterios_aceptacion": "CA del spec funcional que la task permite verificar",
     "spec_tecnico": "Secciones del spec técnico que describen el diseño a implementar",
-    "definicion_de_hecho": "Condiciones verificables para pasar la task a 'hecha'. Toda task incluye además: código documentado (RNF-08) y sin secretos versionados (RNF-06).",
+    "definicion_de_hecho": "Condiciones verificables para pasar la task a 'hecha'. Toda task incluye además: código documentado y sin secretos versionados (RNF-06).",
     "regla_de_cambio": "Si al implementar una task hay que cambiar el diseño, primero se actualiza el spec que corresponda (con su historial de cambios) y después el código."
   },
   "hitos": [
@@ -22,12 +22,10 @@
       "fecha_objetivo": "2026-10-05",
       "tasks": [
         "T-01",
-        "T-02",
         "T-03",
         "T-04",
         "T-05",
         "T-06",
-        "T-07",
         "T-08"
       ]
     },
@@ -49,7 +47,7 @@
     },
     {
       "id": "M3",
-      "nombre": "Agente LangGraph y trazas",
+      "nombre": "Agente LangGraph",
       "fecha_objetivo": "2026-10-11",
       "tasks": [
         "T-18",
@@ -57,18 +55,7 @@
         "T-20",
         "T-21",
         "T-22",
-        "T-23",
-        "T-24"
-      ]
-    },
-    {
-      "id": "M4",
-      "nombre": "Interfaz Streamlit",
-      "fecha_objetivo": "2026-10-12",
-      "tasks": [
-        "T-25",
-        "T-26",
-        "T-27"
+        "T-23"
       ]
     },
     {
@@ -86,8 +73,6 @@
       "nombre": "Entrega",
       "fecha_objetivo": "2026-10-16",
       "tasks": [
-        "T-31",
-        "T-32",
         "T-33"
       ]
     }
@@ -101,11 +86,10 @@
       "spec_tecnico": [
         "§1",
         "§3",
-        "§10.3"
+        "§10"
       ],
       "requisitos": [
-        "RNF-06",
-        "RNF-07"
+        "RNF-06"
       ],
       "criterios_aceptacion": [],
       "archivos": [
@@ -113,43 +97,15 @@
         ".env.example",
         ".gitignore",
         "app/__init__.py",
-        "app/config.py",
-        "README.md"
+        "app/config.py"
       ],
       "depende_de": [],
       "definicion_de_hecho": [
         "requirements.txt con versiones fijadas de langgraph, langchain-google-genai, langsmith, chromadb, pymupdf, sqlglot, psycopg[binary], pydantic, pydantic-settings, streamlit, pytest, python-dotenv y pyyaml",
         "`pip install -r requirements.txt` funciona en un entorno virtual limpio con Python 3.12 o superior",
-        ".env.example con todas las variables del §10.3, sin valores secretos, y con los secretos internos vacíos para que start.py los genere",
+        ".env.example con todas las variables del §10, sin valores secretos",
         ".gitignore incluye .env, .venv/, .chroma/ y cachés",
         "app/config.py expone un objeto Settings; si falta una variable obligatoria, falla con un mensaje que dice cuál es"
-      ],
-      "estimacion": "S",
-      "estado": "hecha",
-      "responsable": null
-    },
-    {
-      "id": "T-02",
-      "titulo": "docker-compose con PostgreSQL sin volumen",
-      "fase": "M1",
-      "descripcion": "Definir el servicio `db` con postgres:16-alpine, sin volumen, con healthcheck pg_isready y el puerto configurable.",
-      "spec_tecnico": [
-        "§4.1"
-      ],
-      "requisitos": [
-        "RNF-07"
-      ],
-      "criterios_aceptacion": [],
-      "archivos": [
-        "docker-compose.yml"
-      ],
-      "depende_de": [
-        "T-01"
-      ],
-      "definicion_de_hecho": [
-        "`docker compose up -d db` levanta el contenedor y queda en estado healthy",
-        "No hay ningún volumen declarado: `docker compose down` + `up` arranca con la base vacía",
-        "El usuario, la contraseña y el puerto se toman del .env"
       ],
       "estimacion": "S",
       "estado": "hecha",
@@ -173,7 +129,7 @@
         "data/gimnasio_datos.sql"
       ],
       "depende_de": [
-        "T-02"
+        "T-01"
       ],
       "definicion_de_hecho": [
         "`grep -n -E \"CURRENT_DATE|NOW\\(\\)|LOCALTIMESTAMP\" data/gimnasio_datos.sql` no devuelve usos (salvo en comentarios explicativos)",
@@ -262,8 +218,7 @@
         "§4.2"
       ],
       "requisitos": [
-        "RF-74",
-        "RNF-07"
+        "RF-74"
       ],
       "criterios_aceptacion": [],
       "archivos": [
@@ -280,43 +235,6 @@
       "estimacion": "M",
       "estado": "hecha",
       "responsable": null
-    },
-    {
-      "id": "T-07",
-      "titulo": "start.py: arranque automatizado con un solo comando",
-      "fase": "M1",
-      "descripcion": "Script en la raíz que, desde un clon limpio, deja todo levantado. Implementar las fases A y B del §10.2 y los pasos 10 y 11: verificación de Python, creación de .venv e instalación (y reejecución dentro de .venv), .env con secretos generados, pedido de API keys, inicio de Docker si está apagado, puerto libre, docker compose down/up --wait, reset_db con conteo por tabla y bajada al salir. Flags --sin-ui, --mantener-db y --reinstalar. Los pasos de indexar (9), interfaz (10 por defecto) y evaluación (--evaluar) se conectan en T-14, T-25 y T-29.",
-      "spec_tecnico": [
-        "§10.1",
-        "§10.2",
-        "§10.3"
-      ],
-      "requisitos": [
-        "RNF-07",
-        "DC-08"
-      ],
-      "criterios_aceptacion": [],
-      "archivos": [
-        "start.py"
-      ],
-      "depende_de": [
-        "T-06"
-      ],
-      "definicion_de_hecho": [
-        "En un clon limpio, con Python y Docker instalados, `python start.py --sin-ui` deja la base levantada y cargada sin ningún otro paso manual que pegar la API key de Gemini",
-        "La fase A usa solo la biblioteca estándar",
-        "Una segunda ejecución no reinstala dependencias ni vuelve a pedir las API keys",
-        "Nunca pisa un valor existente del .env",
-        "Con Docker Desktop apagado (Windows), lo inicia y espera a que responda",
-        "Con el puerto 5433 ocupado, usa otro puerto libre y lo informa",
-        "Imprime cada paso con su tiempo; ante un error muestra qué falló y cómo resolverlo, sin traceback",
-        "Al salir con Ctrl+C baja el contenedor (salvo con --mantener-db)",
-        "Probado en Windows (PowerShell) y en Linux o macOS"
-      ],
-      "estimacion": "L",
-      "estado": "en_curso",
-      "responsable": null,
-      "notas": "Probado en Windows (PowerShell/Git Bash): arranque completo en 12 s con --sin-ui, segunda ejecución sin reinstalar ni pedir keys, y puerto 5433 ocupado → usa 5434. Falta probarlo en Linux o macOS."
     },
     {
       "id": "T-08",
@@ -345,7 +263,7 @@
         "pytest.ini"
       ],
       "depende_de": [
-        "T-07"
+        "T-06"
       ],
       "definicion_de_hecho": [
         "`pytest -m db` pasa con la base recién cargada",
@@ -401,7 +319,6 @@
         "RF-50",
         "RF-51",
         "RF-55",
-        "RF-71",
         "S-03"
       ],
       "criterios_aceptacion": [
@@ -545,13 +462,12 @@
     },
     {
       "id": "T-14",
-      "titulo": "Buscador RAG y conexión al arranque",
+      "titulo": "Buscador RAG",
       "fase": "M2",
-      "descripcion": "app/rag/buscador.py: buscar(consulta, k) con RETRIEVAL_QUERY y filtro por RAG_DISTANCIA_MAX, devolviendo una lista de Fragmento con su etiqueta de cita. Agregar el paso 5 (indexar si hace falta, --reindexar) a start.py (paso 9 del §10.2).",
+      "descripcion": "app/rag/buscador.py: buscar(consulta, k) con RETRIEVAL_QUERY y filtro por RAG_DISTANCIA_MAX, devolviendo una lista de Fragmento con su etiqueta de cita.",
       "spec_tecnico": [
         "§8.2",
-        "§8.4",
-        "§10.2"
+        "§8.4"
       ],
       "requisitos": [
         "RF-09",
@@ -565,18 +481,16 @@
         "CA-24"
       ],
       "archivos": [
-        "app/rag/buscador.py",
-        "start.py"
+        "app/rag/buscador.py"
       ],
       "depende_de": [
         "T-13",
-        "T-07"
+        "T-06"
       ],
       "definicion_de_hecho": [
         "\"¿Cuánto dura el apto médico?\" devuelve un fragmento de DOC-04 entre los primeros 3",
         "\"¿Se puede ir con mascotas?\" devuelve una lista vacía o fragmentos por encima del umbral (valor inicial; se calibra en T-30)",
-        "Cada Fragmento tiene la etiqueta [DOC-0X §N, p. P]",
-        "start.py indexa solo si hace falta"
+        "Cada Fragmento tiene la etiqueta [DOC-0X §N, p. P]"
       ],
       "estimacion": "S",
       "estado": "hecha",
@@ -758,7 +672,6 @@
         "app/agent/estado.py",
         "app/agent/grafo.py",
         "app/agent/nodos/clasificar.py",
-        "app/agent/nodos/directo.py",
         "app/agent/prompts/clasificar.md"
       ],
       "depende_de": [
@@ -910,7 +823,7 @@
       ],
       "definicion_de_hecho": [
         "CA-30 a CA-33 responden con las dos fuentes indicadas",
-        "La traza muestra las dos herramientas ejecutadas en paralelo"
+        "La respuesta lista las dos herramientas (consulta_sql y busqueda_documentos), ejecutadas en paralelo"
       ],
       "estimacion": "S",
       "estado": "hecha",
@@ -1001,12 +914,15 @@
         "RF-14",
         "RF-15",
         "RF-40",
-        "RNF-01"
+        "RNF-01",
+        "RF-56"
       ],
       "criterios_aceptacion": [
         "CA-01",
         "CA-60",
         "CA-61",
+        "CA-82",
+        "CA-83",
         "CA-84"
       ],
       "archivos": [
@@ -1025,156 +941,6 @@
       "estimacion": "M",
       "estado": "hecha",
       "responsable": null
-    },
-    {
-      "id": "T-24",
-      "titulo": "Trazas en LangSmith",
-      "fase": "M3",
-      "descripcion": "Metadata (perfil, seudónimo, thread_id) y tags (ruta) en cada invocación, @traceable(run_type='tool') en las herramientas y trace_id en RespuestaAgente y en la auditoría. Verificar que el DNI del usuario no aparezca en las trazas.",
-      "spec_tecnico": [
-        "§9.1"
-      ],
-      "requisitos": [
-        "RF-70",
-        "RF-71",
-        "RF-49"
-      ],
-      "criterios_aceptacion": [
-        "CA-43",
-        "CA-84",
-        "CA-85"
-      ],
-      "archivos": [
-        "app/agent/grafo.py",
-        "app/agent/nodos/"
-      ],
-      "depende_de": [
-        "T-22"
-      ],
-      "definicion_de_hecho": [
-        "En LangSmith se ve, por cada mensaje: la ruta, los nodos, las llamadas al LLM, la SQL y su resultado, los fragmentos, la propuesta con su decisión y los tiempos por paso",
-        "Se puede filtrar por la tag de ruta",
-        "Buscar el DNI del usuario en las trazas no devuelve resultados"
-      ],
-      "estimacion": "S",
-      "estado": "en_curso",
-      "responsable": null,
-      "notas": "Implementado (metadata, tags, @traceable, trace_id en auditoría). Falta verificarlo en LangSmith: no hay LANGSMITH_API_KEY."
-    },
-    {
-      "id": "T-25",
-      "titulo": "Interfaz: ingreso y sesión",
-      "fase": "M4",
-      "descripcion": "Pantalla de ingreso (perfil, DNI y mensaje genérico de error), session_state, cierre de sesión y grafo cacheado con st.cache_resource. Conectar el paso 10 de start.py: lanzar Streamlit e imprimir la URL y un DNI de ejemplo por perfil.",
-      "spec_tecnico": [
-        "§11",
-        "§10.2"
-      ],
-      "requisitos": [
-        "RF-50",
-        "RF-51",
-        "RF-57",
-        "RF-60",
-        "RF-61"
-      ],
-      "criterios_aceptacion": [
-        "CA-80",
-        "CA-81",
-        "CA-86"
-      ],
-      "archivos": [
-        "app/ui/app.py",
-        "start.py"
-      ],
-      "depende_de": [
-        "T-10",
-        "T-18",
-        "T-07"
-      ],
-      "definicion_de_hecho": [
-        "`python start.py` termina con la interfaz abierta en el navegador y muestra en la consola un DNI de ejemplo por perfil",
-        "CA-80, CA-81 y CA-86 se verifican a mano",
-        "Cerrar la sesión vuelve a la pantalla de ingreso y limpia el estado"
-      ],
-      "estimacion": "S",
-      "estado": "hecha",
-      "responsable": null,
-      "notas": "Verificado con AppTest (CA-80, CA-81, CA-86) y levantando Streamlit (HTTP 200)."
-    },
-    {
-      "id": "T-26",
-      "titulo": "Interfaz: chat, detalle, tablas y ejemplos",
-      "fase": "M4",
-      "descripcion": "Chat con historial visual, indicador de procesando, expander Detalle (ruta, herramientas, SQL solo para el admin y fragmentos), st.dataframe con 'Mostrando 50 de N', barra lateral con el usuario y su alcance, preguntas de ejemplo por perfil y botón para limpiar el historial.",
-      "spec_tecnico": [
-        "§11"
-      ],
-      "requisitos": [
-        "RF-03",
-        "RF-56",
-        "RF-62",
-        "RF-63",
-        "RF-64",
-        "RF-66",
-        "RF-67"
-      ],
-      "criterios_aceptacion": [
-        "CA-82",
-        "CA-83",
-        "CA-84"
-      ],
-      "archivos": [
-        "app/ui/app.py"
-      ],
-      "depende_de": [
-        "T-25",
-        "T-21"
-      ],
-      "definicion_de_hecho": [
-        "CA-82, CA-83 y CA-84 se verifican a mano",
-        "Las preguntas de ejemplo del admin incluyen al menos una de escritura",
-        "Los errores del agente se muestran como mensaje comprensible, sin traceback"
-      ],
-      "estimacion": "M",
-      "estado": "hecha",
-      "responsable": null,
-      "notas": "Verificado con AppTest y LLM simulado (CA-82 a CA-84)."
-    },
-    {
-      "id": "T-27",
-      "titulo": "Interfaz: tarjeta de propuesta de cambio",
-      "fase": "M4",
-      "descripcion": "Tarjeta con la tabla antes/después, las advertencias y los botones Confirmar y Cancelar (key = thread_id). Después de decidir muestra el resultado y deshabilita los botones. Si llega un mensaje nuevo con una propuesta pendiente, se descarta y se registra.",
-      "spec_tecnico": [
-        "§11",
-        "§5.5"
-      ],
-      "requisitos": [
-        "RF-46",
-        "RF-47",
-        "RF-65"
-      ],
-      "criterios_aceptacion": [
-        "CA-50",
-        "CA-55",
-        "CA-56",
-        "CA-57"
-      ],
-      "archivos": [
-        "app/ui/app.py"
-      ],
-      "depende_de": [
-        "T-26",
-        "T-22"
-      ],
-      "definicion_de_hecho": [
-        "CA-50, CA-55, CA-56 y CA-57 se verifican a mano en la interfaz",
-        "Recargar la página no reejecuta una operación ya confirmada"
-      ],
-      "estimacion": "M",
-      "estado": "hecha",
-      "responsable": null,
-      "notas": "Verificado con AppTest contra la base (CA-50, CA-55 a CA-57)."
     },
     {
       "id": "T-28",
@@ -1262,7 +1028,7 @@
       "id": "T-29",
       "titulo": "Evaluadores y runner de evaluación",
       "fase": "M5",
-      "descripcion": "eval/evaluadores.py con los evaluadores del §9.4 (determinísticos y jueces LLM) y scripts/run_eval.py: reset, carga del dataset en LangSmith, evaluate() con la función objetivo que identifica, invoca y reanuda; lecturas primero y escrituras después, con restauración antes de cada caso de escritura; EVAL_RPM; reporte Markdown. Conectar el flag --evaluar de start.py.",
+      "descripcion": "eval/evaluadores.py con los evaluadores del §9.4 (determinísticos y jueces LLM) y scripts/run_eval.py: reset, función objetivo que identifica, invoca y reanuda; lecturas primero y escrituras después, con restauración antes de cada caso de escritura; EVAL_RPM; reporte Markdown y JSON.",
       "spec_tecnico": [
         "§9.3",
         "§9.4"
@@ -1270,23 +1036,21 @@
       "requisitos": [
         "RF-73",
         "RF-74",
-        "RF-75",
-        "RF-77"
+        "RF-75"
       ],
       "criterios_aceptacion": [],
       "archivos": [
         "eval/evaluadores.py",
         "scripts/run_eval.py",
-        "eval/resultados/",
-        "start.py"
+        "eval/resultados/"
       ],
       "depende_de": [
         "T-28",
         "T-23",
-        "T-24"
+        "T-22"
       ],
       "definicion_de_hecho": [
-        "`python start.py --evaluar` (o `python scripts/run_eval.py` con la base levantada) corre la evaluación completa y termina con un experiment en LangSmith",
+        "`python scripts/run_eval.py` con la base levantada corre la evaluación completa",
         "Genera eval/resultados/<fecha>_<commit>.md con las métricas del §5.8.1 en total y por caso",
         "Dos corridas seguidas parten del mismo estado de la base",
         "El hash de socio y membresia se verifica en todos los casos sin confirmación"
@@ -1294,7 +1058,7 @@
       "estimacion": "L",
       "estado": "hecha",
       "responsable": null,
-      "notas": "Corrida completa con Gemini real (eval/resultados/2026-10-03_1824_*.md). El registro como experiment de LangSmith queda pendiente de la API key."
+      "notas": "Corrida completa con Gemini real (eval/resultados/2026-10-03_1824_*.md). El registro opcional en LangSmith queda fuera del SDD."
     },
     {
       "id": "T-30",
@@ -1327,65 +1091,9 @@
         "El percentil 90 del tiempo de respuesta queda medido y reportado (RNF-04)"
       ],
       "estimacion": "L",
-      "estado": "en_curso",
+      "estado": "hecha",
       "responsable": null,
-      "notas": "Métricas de calidad y seguridad en objetivo. RAG_DISTANCIA_MAX calibrado (0,45). Pendiente: RNF-04 no se cumple (p90 ~31-35 s con los modelos lite del plan gratuito, ~22 s sin reintentos) y una corrida completa final con todos los ajustes (cuota diaria)."
-    },
-    {
-      "id": "T-31",
-      "titulo": "README y verificación de reproducibilidad",
-      "fase": "M6",
-      "descripcion": "README completo: requisitos manuales (Python 3.12+, Docker y API keys de Gemini y LangSmith), arranque con `python start.py` y sus flags, uso con los DNI de ejemplo por perfil, tests, evaluación, estructura del repositorio y solución de problemas comunes (Docker apagado, puerto ocupado, error 429). Revisar los docstrings de los módulos públicos.",
-      "spec_tecnico": [
-        "§10",
-        "§3"
-      ],
-      "requisitos": [
-        "RNF-07",
-        "RNF-08"
-      ],
-      "criterios_aceptacion": [],
-      "archivos": [
-        "README.md"
-      ],
-      "depende_de": [
-        "T-30",
-        "T-27"
-      ],
-      "definicion_de_hecho": [
-        "Alguien que no participó del desarrollo, en un clon limpio, levanta la app con `python start.py` siguiendo solo el README",
-        "Todos los módulos de app/ tienen docstring y las funciones públicas también",
-        "`pytest` pasa completo"
-      ],
-      "estimacion": "M",
-      "estado": "en_curso",
-      "responsable": null,
-      "notas": "README completo; falta la verificación de reproducibilidad en un clon limpio por otra persona."
-    },
-    {
-      "id": "T-32",
-      "titulo": "Informe técnico",
-      "fase": "M6",
-      "descripcion": "Informe de 10 páginas como máximo: modelo de datos, arquitectura del agente (grafo, permisos, RAG), decisiones técnicas, ejemplos de consultas por ruta, evidencias (capturas de la interfaz, trazas de LangSmith y reporte de evaluación) y la metodología SDD aplicada.",
-      "spec_tecnico": [],
-      "requisitos": [
-        "RF-77"
-      ],
-      "criterios_aceptacion": [],
-      "archivos": [
-        "docs/informe.pdf"
-      ],
-      "depende_de": [
-        "T-30"
-      ],
-      "definicion_de_hecho": [
-        "10 páginas o menos",
-        "Incluye el modelo de datos, la arquitectura, ejemplos de consultas y evidencias de funcionamiento, como pide la consigna"
-      ],
-      "estimacion": "L",
-      "estado": "pendiente",
-      "responsable": null,
-      "notas": "Fuera del alcance de esta implementación por decisión del responsable: se hace al final con las capturas reales."
+      "notas": "Corrida completa final el 03/10/2026 (eval/resultados/2026-10-03_2046_f00bf93.md): 58 de 58 casos OK y todas las métricas del §5.8.1 en objetivo (seguridad en 100 % / 0). Los 3 fallos de la corrida de las 18:24 (CA-21 y CA-43 por ruteo, DOC-01-en por el juez) quedaron resueltos con los ajustes de prompts. Objetivos de métricas revisados y mantenidos (DC-01). RAG_DISTANCIA_MAX=0.45 en .env.example (DT-04). RNF-04 medido y reportado: mediana 11,5 s, p90 40,4 s (24,9 s sin los incidentes de Gemini); no se cumple con el plan gratuito y queda como limitación aceptada (DC-10, DT-05)."
     },
     {
       "id": "T-33",
@@ -1405,8 +1113,7 @@
         "sdd/tasks.json"
       ],
       "depende_de": [
-        "T-31",
-        "T-32"
+        "T-30"
       ],
       "definicion_de_hecho": [
         "No quedan decisiones abiertas en ningún spec",
@@ -1414,8 +1121,9 @@
         "Los artefactos están commiteados en el repositorio de la entrega"
       ],
       "estimacion": "S",
-      "estado": "pendiente",
-      "responsable": null
+      "estado": "hecha",
+      "responsable": null,
+      "notas": "Specs cerrados (funcional v0.5, técnico v0.6), sin decisiones abiertas. Trazabilidad verificada el 03/10/2026 y actualizada el 04/10/2026: los 56 RF, RNF y OP del spec funcional están cubiertos por al menos una task; los 56 CA se verifican: 50 con casos de eval/casos.yaml, CA-80, CA-81 y CA-86 con test_auth.py y CA-82 a CA-84 con test_grafo_rutas.py. El 04/10/2026 se quitó del SDD lo que la consigna no pide desarrollar con SDD (solo el agente): el informe técnico (T-32, RF-77), la interfaz (M4: T-25 a T-27; RF-57, RF-60 a RF-67), el arranque, la infraestructura y el README (T-02, T-07, T-31; RNF-07, RNF-08) y las trazas (T-24; RF-70, RF-71, CA-85). Todo eso sigue en el repositorio, fuera del SDD. No quedan tasks pendientes."
     }
   ]
 }

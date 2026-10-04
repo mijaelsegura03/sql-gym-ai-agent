@@ -1,10 +1,11 @@
-"""Interfaz Streamlit del agente del gimnasio (spec técnico §11; RF-60 a RF-67).
+"""Interfaz Streamlit del agente del gimnasio (fuera del SDD: consume ``RespuestaAgente`` y las
+funciones de entrada del spec técnico §5.6).
 
-- Pantalla de ingreso: perfil + DNI (RF-50, RF-51, RF-61).
+- Pantalla de ingreso: perfil + DNI (RF-50, RF-51).
 - Chat con historial solo visual (cada mensaje se resuelve sin contexto, RF-21), indicador de
   "procesando", tablas, detalle de cada respuesta y tarjeta de propuesta de cambio con los botones
-  Confirmar y Cancelar (RF-62 a RF-65).
-- Barra lateral con el usuario, su alcance, mensajes de ejemplo, limpiar historial y cerrar sesión (RF-66, RF-67).
+  Confirmar y Cancelar (RF-46, RF-47).
+- Barra lateral con el usuario, su alcance, mensajes de ejemplo, limpiar historial y cerrar sesión.
 
 Ejecutar con ``streamlit run app/ui/app.py`` (o ``python start.py``, que además prepara todo).
 """
@@ -31,7 +32,24 @@ from app.agent.estado import RespuestaAgente  # noqa: E402
 from app.auth import Usuario, identificar  # noqa: E402
 from app.ops.mensajes import OPERACIONES, filas_comparacion, texto_aviso  # noqa: E402
 
-st.set_page_config(page_title="Asistente del gimnasio", page_icon="🏋️", layout="wide")
+st.set_page_config(page_title="Asistente del gimnasio", page_icon=":material/fitness_center:", layout="wide")
+
+# Ajustes de estilo que el tema de .streamlit/config.toml no cubre: ancho de lectura, jerarquía
+# tipográfica y botones de ejemplo alineados a la izquierda.
+ESTILOS = """
+<style>
+.block-container, [data-testid="stBottomBlockContainer"] { max-width: 860px; }
+.block-container { padding-top: 2.75rem; }
+h1 { font-size: 1.65rem !important; font-weight: 600 !important; letter-spacing: -0.01em; }
+h4 { font-weight: 600 !important; }
+.antetitulo { color: #2E6F6A; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em;
+              text-transform: uppercase; margin-bottom: -0.6rem; }
+.etiqueta { color: #6B6F73; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.st-key-ejemplos button, .st-key-ejemplos button > div { justify-content: flex-start; text-align: left; }
+.st-key-ejemplos button p { font-size: 0.875rem; }
+[data-testid="stExpander"] details { border-color: #E2DFD8; }
+</style>
+"""
 
 MENSAJE_LOGIN_INVALIDO = "No encontramos un usuario con esos datos."
 NOMBRES_RUTA = {
@@ -46,7 +64,7 @@ NOMBRES_RUTA = {
 # ---------------------------------------------------------------------------
 @st.cache_resource(show_spinner=False)
 def grafo():
-    """Grafo compilado una sola vez por proceso (§11)."""
+    """Grafo compilado una sola vez por proceso."""
     from app.agent.grafo import get_grafo
 
     return get_grafo()
@@ -68,7 +86,7 @@ def iniciar_estado() -> None:
 
 
 def cerrar_sesion() -> None:
-    """Descarta la propuesta pendiente (RF-47) y vuelve a la pantalla de ingreso (RF-57)."""
+    """Descarta la propuesta pendiente (RF-47) y vuelve a la pantalla de ingreso."""
     usuario: Usuario | None = st.session_state.get("usuario")
     if usuario and st.session_state.get("pendiente"):
         try:
@@ -90,33 +108,41 @@ def limpiar_historial() -> None:
 # ---------------------------------------------------------------------------
 # Pantalla de ingreso
 # ---------------------------------------------------------------------------
+def encabezado() -> None:
+    st.markdown(ESTILOS, unsafe_allow_html=True)
+    st.markdown('<p class="antetitulo">Sedes Centro · Norte · Sur</p>', unsafe_allow_html=True)
+    st.title("Asistente del gimnasio")
+
+
 def pantalla_ingreso() -> None:
-    st.title("🏋️ Asistente del gimnasio")
-    st.caption("Sedes Centro, Norte y Sur · consultas de datos, políticas y gestión de socios")
-    with st.form("ingreso", border=True):
-        perfil = st.radio("Perfil", ["Socio", "Administrador"], horizontal=True)
-        dni = st.text_input("DNI", placeholder="Solo números, sin puntos")
-        enviar = st.form_submit_button("Ingresar", type="primary")
-    if enviar:
-        try:
-            usuario = identificar("admin" if perfil == "Administrador" else "socio", dni)
-        except Exception:  # noqa: BLE001
-            st.error("No se pudo conectar con la base de datos. Verificá que esté levantada (python start.py).")
-            return
-        if usuario is None:
-            st.error(MENSAJE_LOGIN_INVALIDO)  # genérico: no revela si existe con otro perfil (RF-51)
-            return
-        st.session_state["usuario"] = usuario
-        st.session_state["historial"] = []
-        st.rerun()
-    st.info("Identificación simulada por DNI, sin contraseña (supuesto S-01 del spec funcional).", icon="ℹ️")
+    _, centro, _ = st.columns([1, 3, 1])
+    with centro:
+        encabezado()
+        st.caption("Consultas de datos, políticas del gimnasio y gestión de socios.")
+        with st.form("ingreso", border=True):
+            perfil = st.radio("Perfil", ["Socio", "Administrador"], horizontal=True)
+            dni = st.text_input("DNI", placeholder="Solo números, sin puntos")
+            enviar = st.form_submit_button("Ingresar", type="primary", use_container_width=True)
+        if enviar:
+            try:
+                usuario = identificar("admin" if perfil == "Administrador" else "socio", dni)
+            except Exception:  # noqa: BLE001
+                st.error("No se pudo conectar con la base de datos. Verificá que esté levantada (python start.py).")
+                return
+            if usuario is None:
+                st.error(MENSAJE_LOGIN_INVALIDO)  # genérico: no revela si existe con otro perfil (RF-51)
+                return
+            st.session_state["usuario"] = usuario
+            st.session_state["historial"] = []
+            st.rerun()
+        st.caption("Identificación simulada por DNI, sin contraseña (supuesto S-01 del spec funcional).")
 
 
 # ---------------------------------------------------------------------------
 # Barra lateral
 # ---------------------------------------------------------------------------
 def ejemplos(usuario: Usuario) -> list[str]:
-    """Entre 4 y 6 mensajes de ejemplo por perfil; el administrador tiene al menos uno de escritura (RF-66)."""
+    """Entre 4 y 6 mensajes de ejemplo por perfil; el administrador tiene al menos uno de escritura."""
     if not usuario.es_admin:
         return [
             "Hola, ¿cuándo vence mi cuota?",
@@ -124,7 +150,7 @@ def ejemplos(usuario: Usuario) -> list[str]:
             "¿Cuánto dura el apto médico?",
             "¿Puedo reservar Crossfit con mi plan?",
             "¿Cuántos lugares quedan en la próxima clase de Zumba de mi sede?",
-            "Can I cancel a class booking without penalty?",
+            "¿Puedo cancelar una reserva de clase sin penalización?",
         ]
     sede = "" if usuario.sede_alcance else ", sede Norte"
     return [
@@ -134,13 +160,13 @@ def ejemplos(usuario: Usuario) -> list[str]:
         "¿Por qué le rechazaron el ingreso al socio con DNI 34896217 y qué tiene que hacer?",
         "Dá de alta a Ana Torres, DNI 40111222, nacida el 12/03/1995, email ana.torres@example.com, "
         f"contacto de emergencia Luis Torres (padre) 341 5551234{sede}.",
-        "What can you do?",
+        "¿Qué podés hacer?",
     ]
 
 
 def barra_lateral(usuario: Usuario) -> None:
     with st.sidebar:
-        st.subheader("👤 " + usuario.nombre)
+        st.subheader(usuario.nombre)
         perfil = "Administrador" if usuario.es_admin else "Socio"
         if usuario.es_admin and usuario.rol:
             perfil += f" ({usuario.rol})"
@@ -150,14 +176,15 @@ def barra_lateral(usuario: Usuario) -> None:
         elif usuario.sede_nombre:
             st.markdown(f"**Sede principal:** {usuario.sede_nombre}")
         st.divider()
-        st.markdown("**Probá con estos mensajes**")
-        for i, ejemplo in enumerate(ejemplos(usuario)):
-            if st.button(ejemplo, key=f"ejemplo_{i}", use_container_width=True):
-                st.session_state["entrada_ejemplo"] = ejemplo
+        st.markdown('<p class="etiqueta">Probá con estos mensajes</p>', unsafe_allow_html=True)
+        with st.container(key="ejemplos"):
+            for i, ejemplo in enumerate(ejemplos(usuario)):
+                if st.button(ejemplo, key=f"ejemplo_{i}", use_container_width=True):
+                    st.session_state["entrada_ejemplo"] = ejemplo
         st.divider()
         c1, c2 = st.columns(2)
-        c1.button("🧹 Limpiar chat", on_click=limpiar_historial, use_container_width=True)
-        c2.button("🚪 Cerrar sesión", on_click=cerrar_sesion, use_container_width=True)
+        c1.button("Limpiar chat", on_click=limpiar_historial, use_container_width=True)
+        c2.button("Cerrar sesión", on_click=cerrar_sesion, use_container_width=True)
         st.caption("Cada mensaje se responde de forma independiente: el historial es solo visual.")
 
 
@@ -198,7 +225,7 @@ def mostrar_detalle(r: RespuestaAgente) -> None:
 
 
 def decidir(indice: int, decision: str) -> None:
-    """Callback de los botones Confirmar / Cancelar de la tarjeta (RF-46, RF-65)."""
+    """Callback de los botones Confirmar / Cancelar de la tarjeta (RF-46)."""
     entrada = st.session_state["historial"][indice]
     if entrada.get("decision"):
         return
@@ -222,15 +249,15 @@ def mostrar_propuesta(indice: int, entrada: dict) -> None:
     en = idioma == "en"
     with st.container(border=True):
         titulo = OPERACIONES["en" if en else "es"].get(p.operacion, p.operacion)
-        st.markdown(f"#### 📝 {'Change proposal' if en else 'Propuesta de cambio'}: {titulo}")
+        st.markdown(f"#### {'Change proposal' if en else 'Propuesta de cambio'}: {titulo}")
         st.markdown(f"**{'Member' if en else 'Socio'}:** {p.socio.nombre} — DNI {p.socio.dni}")
         if p.motivo:
             st.markdown(f"**{'Reason' if en else 'Motivo'}:** {p.motivo}")
         st.dataframe(pd.DataFrame(filas_comparacion(p, idioma)), hide_index=True, use_container_width=True)
         for efecto in p.efectos:
-            st.warning(texto_aviso(efecto, idioma), icon="🔁")
+            st.warning(texto_aviso(efecto, idioma))
         for aviso in p.advertencias:
-            st.info(texto_aviso(aviso, idioma), icon="⚠️")
+            st.info(texto_aviso(aviso, idioma))
         decidida = bool(entrada.get("decision"))
         c1, c2, _ = st.columns([1, 1, 4])
         c1.button("Confirm" if en else "Confirmar", key=f"confirmar_{r.thread_id}", type="primary", disabled=decidida,
@@ -303,7 +330,9 @@ def procesar(usuario: Usuario, mensaje: str) -> None:
 
 def pantalla_chat(usuario: Usuario) -> None:
     barra_lateral(usuario)
-    st.title("🏋️ Asistente del gimnasio")
+    encabezado()
+    if not st.session_state["historial"]:
+        st.caption("Escribí una consulta o elegí uno de los mensajes de ejemplo de la barra lateral.")
     for i, entrada in enumerate(st.session_state["historial"]):
         mostrar_mensaje(i, entrada)
     escrito = st.chat_input("Escribí tu consulta…")

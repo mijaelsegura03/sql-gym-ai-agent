@@ -1,4 +1,5 @@
-"""Interfaz Streamlit con ``AppTest`` y un LLM simulado, contra la base real (CA-80 a CA-86, CA-50, CA-55 a CA-57)."""
+"""Interfaz Streamlit (fuera del SDD) con ``AppTest`` y un LLM simulado, contra la base real
+(CA-50, CA-55 a CA-57, CA-80 a CA-84 y CA-86)."""
 
 from __future__ import annotations
 
@@ -107,7 +108,7 @@ def test_alta_confirmada(at, su):
     assert "Propuesta de cambio" in textos(at) and not _existe(su)
     _boton(at, "confirmar_").click().run()
     assert _existe(su)  # CA-50
-    assert _boton(at, "confirmar_").disabled and _boton(at, "cancelar_").disabled  # RF-65
+    assert _boton(at, "confirmar_").disabled and _boton(at, "cancelar_").disabled
     assert any("realizada" in str(s.value) for s in at.success)
 
 

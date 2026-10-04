@@ -2,10 +2,10 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 0.5 |
+| Versión | 0.6 |
 | Estado | Implementado (ajustes de implementación registrados en el historial) |
-| Fecha | 2026-10-03 |
-| Spec funcional de referencia | `sdd/functional/spec.md` v0.4 |
+| Fecha | 2026-10-04 |
+| Spec funcional de referencia | `sdd/functional/spec.md` v0.5 |
 | Siguiente artefacto | `sdd/tasks.json` |
 
 > Este documento define **cómo** se implementa lo que pide el spec funcional. Cada decisión
@@ -21,8 +21,7 @@
 | T-01 | Lenguaje | **Python 3.12+** | — |
 | T-02 | LLM | **Google Gemini** vía `langchain-google-genai`. Dos modelos configurables por variable de entorno: uno **rápido** (clasificación) y uno **principal** (SQL, extracción, síntesis y juez de evaluación). | Elegido por el plan gratuito. Ver §1.1. |
 | T-03 | Framework agéntico | **LangGraph** (R-01) | Smolagents: no trae control de flujo explícito ni pausa para confirmar (`interrupt`), que se necesita para RF-46. |
-| T-04 | Interfaz | **Streamlit** (RF-60 a RF-67) | — |
-| T-05 | Observabilidad y evaluación | **LangSmith**: trazas (RF-70), datasets y experimentos (RF-72 a RF-75) | Langfuse: hay que levantarlo en Docker y suma servicios. |
+| T-05 | Evaluación | **Runner propio** (`scripts/run_eval.py`) con reportes versionados en `eval/resultados/` (RF-72 a RF-76). El registro en LangSmith es opcional y queda fuera del SDD. | `langsmith.evaluate()` como ejecución: el orden de los casos y la restauración de la base dependerían de cómo recorre los ejemplos (§9.3). |
 | T-06 | Base relacional | **PostgreSQL 16** en Docker, sin volumen (DC-08) | — |
 | T-07 | Base vectorial | **Chroma** embebida (`chromadb.PersistentClient`) en `.chroma/` (no se versiona) | pgvector: se descartó a favor de un componente separado de la base relacional. |
 | T-08 | Embeddings | **`gemini-embedding-001`**, con `task_type` `RETRIEVAL_DOCUMENT` al indexar y `RETRIEVAL_QUERY` al buscar | Es el modelo estable de embeddings de Gemini; `gemini-embedding-2-preview` está en preview. |
@@ -31,7 +30,6 @@
 | T-11 | Driver de Postgres | **psycopg 3** (`psycopg[binary]`) | — |
 | T-12 | Esquemas de datos | **Pydantic v2** para el estado, las salidas estructuradas del LLM y las operaciones | — |
 | T-13 | Tests | **pytest** | — |
-| T-14 | Arranque | Script **`start.py`** en la raíz: con un solo comando prepara el entorno y la configuración, levanta `docker compose`, crea las tablas, carga los datos, indexa los PDFs y abre la interfaz (§10) | `docker-entrypoint-initdb.d`: también serviría, pero deja la carga dentro del contenedor y hace menos visible cada paso. |
 
 ### 1.1 Modelos de Gemini
 
@@ -56,12 +54,11 @@ Verificado en la documentación de Google el 03/10/2026 (ai.google.dev, páginas
 
 ```
                          ┌──────────────────────────────────────────────┐
-  Navegador ───────────▶ │ Streamlit (app/ui)                           │
-                         │  login · chat · tarjeta de propuesta         │
+                         │ Cliente del agente (interfaz, fuera del SDD) │
                          └───────┬───────────────────────▲──────────────┘
                                  │ invoke / resume        │ RespuestaAgente
                          ┌───────▼───────────────────────┴──────────────┐
-                         │ Grafo LangGraph (app/agent)                  │──▶ LangSmith (trazas)
+                         │ Grafo LangGraph (app/agent)                  │
                          │  clasificar → ruta → nodos → sintetizar      │
                          └──┬──────────────┬───────────────┬────────────┘
                             │ lectura      │ búsqueda      │ escritura
@@ -109,13 +106,11 @@ validados, ejecutadas con un rol distinto.
 │   │   ├── validacion.py         # Reglas de negocio (§7) → ResultadoValidacion
 │   │   ├── ejecucion.py          # Transacción con rol escritor + auditoría
 │   │   └── auditoria.py
-│   ├── agent/
-│   │   ├── estado.py             # EstadoAgente (TypedDict) y RespuestaAgente
-│   │   ├── grafo.py              # Construcción del StateGraph
-│   │   ├── nodos/                # Un módulo por nodo (§5.2)
-│   │   └── prompts/              # Prompts versionados en .md
-│   └── ui/
-│       └── app.py                # Streamlit
+│   └── agent/
+│       ├── estado.py             # EstadoAgente (TypedDict) y RespuestaAgente
+│       ├── grafo.py              # Construcción del StateGraph
+│       ├── nodos/                # Nodos agrupados por ruta (§5.2)
+│       └── prompts/              # Prompts versionados en .md
 ├── data/
 │   ├── gimnasio_schema.sql       # Existente (punto 1)
 │   ├── gimnasio_datos.sql        # Existente (punto 2) — se modifica (§4.4)
@@ -124,18 +119,15 @@ validados, ejecutadas con un rol distinto.
 ├── eval/
 │   ├── casos.yaml                # Conjunto de evaluación versionado (RF-72)
 │   ├── evaluadores.py
-│   └── resultados/               # Reportes .md por corrida (RF-77)
+│   └── resultados/               # Reportes .md por corrida (RF-75)
 ├── scripts/
-│   ├── reset_db.py               # Recrear la base (usado por start.py y la evaluación)
+│   ├── reset_db.py               # Recrear la base (usado por la evaluación)
 │   ├── indexar_pdfs.py
 │   └── run_eval.py
 ├── tests/
 ├── rag-source/                   # PDFs existentes
-├── start.py                      # Arranque completo con un solo comando (§10)
-├── docker-compose.yml
 ├── requirements.txt
-├── .env.example
-└── README.md
+└── .env.example                  # Configuración (§10)
 ```
 
 ---
@@ -144,9 +136,7 @@ validados, ejecutadas con un rol distinto.
 
 ### 4.1 Contenedor
 
-`docker-compose.yml` define un único servicio `db` (`postgres:16-alpine`), **sin volumen**, con
-`healthcheck` (`pg_isready`) y el puerto publicado en `DB_PORT` (por defecto `5433`, para no chocar
-con un Postgres local). El superusuario se configura con `POSTGRES_USER` y `POSTGRES_PASSWORD`.
+Fuera del SDD: la base corre en un contenedor de Docker (`docker-compose.yml`, PostgreSQL 16 sin volumen), que se levanta con el arranque de la aplicación.
 
 ### 4.2 Bases: plantilla y trabajo
 
@@ -214,7 +204,7 @@ CREATE TABLE agente.auditoria (
     valores_antes   JSONB,
     valores_despues JSONB,
     detalle         TEXT,                   -- errores de validación o de ejecución
-    trace_id        VARCHAR(64)             -- vínculo con la traza de LangSmith
+    trace_id        VARCHAR(64)             -- vínculo con la traza, si hay (fuera del SDD)
 );
 ```
 
@@ -263,7 +253,7 @@ class Usuario(BaseModel):                 # sale de auth.py, nunca del LLM (RF-5
     id: int                               # socio.id o empleado.id
     nombre: str
     sede_alcance: int | None              # admin: sede_id o None = todas; socio: sede principal
-    seudonimo: str                        # HMAC-SHA256(dni, PSEUDONIMO_SECRET)[:12] (RF-71)
+    seudonimo: str                        # HMAC-SHA256(dni, PSEUDONIMO_SECRET)[:12]
 
 class EstadoAgente(TypedDict):
     usuario: Usuario
@@ -291,7 +281,7 @@ class EstadoAgente(TypedDict):
     ruta_final: str | None
 ```
 
-El DNI del usuario **no** forma parte del estado; solo su `id` y su seudónimo (RF-71).
+El DNI del usuario **no** forma parte del estado; solo su `id` y su seudónimo.
 
 ### 5.2 Nodos
 
@@ -306,7 +296,7 @@ El DNI del usuario **no** forma parte del estado; solo su `id` y su seudónimo (
 | `sintetizar` | LLM principal | Redacta la respuesta con las filas o los fragmentos disponibles, en el idioma del mensaje, con citas y fuentes. | RF-10, RF-11, RF-18, RF-19, RF-22 |
 | `extraer_operacion` | LLM principal, salida estructurada | Convierte el mensaje en una `OperacionSocio` (§7.1). | §5.5 funcional |
 | `validar_operacion` | Determinístico (herramienta `operacion_socio`) | Resuelve el socio, verifica alcance y reglas (§7.2) y arma la `PropuestaCambio`. | RF-41 a RF-45 |
-| `confirmar` | `interrupt()` | Pausa el grafo y devuelve la propuesta a la interfaz. Se reanuda con `Command(resume={"decision": ...})`. | RF-46, RF-47 |
+| `confirmar` | `interrupt()` | Pausa el grafo y devuelve la propuesta a quien llamó al agente. Se reanuda con `Command(resume={"decision": ...})`. | RF-46, RF-47 |
 | `ejecutar_operacion` | Determinístico | Revalida, ejecuta en una transacción y registra la auditoría (§7.3). | RF-48, RF-49, RNF-03 |
 | `responder_operacion` | Determinístico, con plantillas es/en | Arma el mensaje del rechazo, la cancelación o el resultado. | RF-45, RF-48 |
 
@@ -371,12 +361,12 @@ dependen de un contexto previo (RF-21).
   anteriores, lo que garantiza RF-21.
 - El checkpointer es `MemorySaver` (en memoria). Solo se usa para sostener el `interrupt()` de una
   propuesta pendiente dentro de su propio hilo.
-- **"Confirmar" y "Cancelar" son botones** que reanudan el hilo de la propuesta. Escribir "sí"
+- **Confirmar y cancelar son acciones explícitas** (`reanudar()`) que reanudan el hilo de la propuesta. Escribir "sí"
   crea un hilo nuevo, que la clasificación resuelve como `necesita_contexto` (RF-46, CA-57).
-- Si llega un mensaje nuevo con una propuesta pendiente, la interfaz descarta ese hilo y registra
+- Si llega un mensaje nuevo con una propuesta pendiente, quien llama al agente descarta ese hilo (`descartar()`) y se registra
   la auditoría con resultado `descartada` (RF-47, CA-56).
 
-### 5.6 Respuesta hacia la interfaz
+### 5.6 Respuesta del agente
 
 ```python
 class RespuestaAgente(BaseModel):
@@ -394,7 +384,7 @@ class RespuestaAgente(BaseModel):
     trace_id: str | None
     # Agregados en la implementación:
     idioma: str
-    propuesta_pendiente: bool        # el grafo quedó esperando Confirmar/Cancelar
+    propuesta_pendiente: bool        # el grafo quedó esperando confirmar o cancelar
     resultado_operacion: ResultadoEjecucion | None
     nodos: list[str]
     duracion_seg: float | None
@@ -405,7 +395,7 @@ Funciones de entrada (`app/agent/grafo.py`): `responder(usuario, mensaje)`, `rea
 decision)` (solo si el hilo tiene una propuesta pendiente del mismo usuario; si no, no ejecuta nada, lo que evita
 reejecutar al recargar la página) y `descartar(usuario, thread_id)`.
 
-La tabla de la interfaz se arma con `filas`, no con el texto del LLM (RF-03, RF-64).
+Las filas se devuelven en `filas`, tomadas del resultado de la consulta y no del texto del LLM (RF-03).
 
 ---
 
@@ -570,9 +560,9 @@ transacción propia).
    acceso"), `pagina` y `chunk_id`.
 6. Se generan los embeddings con `gemini-embedding-001` (`RETRIEVAL_DOCUMENT`) y se guardan en la
    colección `politicas` de Chroma.
-7. Se guarda el hash SHA-256 de cada PDF en los metadatos de la colección. `start.py` reindexa
-   solo si cambió algún hash o si se pasa `--reindexar` (S-02). Así se evitan llamadas de embeddings
-   en cada arranque.
+7. Se guarda el hash SHA-256 de cada PDF en los metadatos de la colección. La ingesta reindexa
+   solo si cambió algún hash o si se fuerza (S-02). Así se evitan llamadas de embeddings
+   innecesarias.
 
 ### 8.2 Búsqueda
 
@@ -594,19 +584,11 @@ los fragmentos citados, no con texto libre del LLM (RF-10, RF-19).
 
 ---
 
-## 9. Observabilidad y evaluación
+## 9. Evaluación
 
-### 9.1 Trazas (RF-70, RF-71)
+### 9.1 Trazas
 
-- Las trazas se activan con `LANGSMITH_TRACING=true`, `LANGSMITH_API_KEY` y `LANGSMITH_PROJECT`.
-  LangGraph traza cada nodo, cada llamada al LLM y cada herramienta automáticamente.
-- Cada invocación lleva `metadata = {perfil, usuario: seudonimo, thread_id}` y `tags = [ruta]`.
-  La ruta se agrega como tag apenas se conoce.
-- Los nodos de herramienta se decoran con `@traceable(run_type="tool")`, así la herramienta
-  invocada queda visible en la traza (CA-84, CA-85).
-- El DNI del usuario nunca entra al estado (§5.1). El texto del mensaje se traza tal como lo
-  escribió el usuario; puede contener DNIs de terceros, lo que se acepta porque los datos son
-  sintéticos (S-04).
+Fuera del SDD (criterio de observabilidad de la consigna). El agente funciona sin trazas; si LangSmith está configurado, cada invocación se traza con el seudónimo del usuario (nunca el DNI) y la auditoría guarda el `trace_id`.
 
 ### 9.2 Conjunto de evaluación (`eval/casos.yaml`, RF-72)
 
@@ -645,18 +627,18 @@ los fragmentos citados, no con texto libre del LLM (RF-10, RF-19).
 ### 9.3 Ejecución (`scripts/run_eval.py`, RF-73 a RF-75)
 
 1. `reset_db.py` (base de trabajo limpia desde la plantilla).
-2. Sube o actualiza `casos.yaml` como dataset de LangSmith (`gimnasio-eval`).
+2. Si LangSmith está configurado (opcional, fuera del SDD), sube o actualiza `casos.yaml` como dataset (`gimnasio-eval`).
 3. Ejecuta, en orden y en el mismo proceso, una función objetivo que identifica al usuario, invoca el grafo y,
    si el caso lo pide, reanuda con la acción indicada; calcula los hashes de `socio` y `membresia` y corre las
-   consultas de verificación. Las trazas de cada caso van a LangSmith. Después registra la corrida con
+   consultas de verificación. Si LangSmith está configurado, después registra la corrida con
    `langsmith.evaluate()` sobre el dataset, con las salidas y las métricas ya calculadas (así el orden y la
    restauración de la base no dependen de cómo `evaluate()` recorre los ejemplos).
 4. Primero corren los casos de lectura y después los de escritura. Antes y después de **cada** caso de
    escritura se restaura la base desde la plantilla (RF-74).
 5. `EVAL_RPM` limita los requests por minuto a Gemini (un limitador global en `app/llm.py` que solo activa la
    evaluación). Los casos con `valido_hasta` vencido se omiten y se informan en el reporte.
-6. Cada corrida queda como un *experiment* de LangSmith (RF-75) y además genera
-   `eval/resultados/<fecha>_<commit>.md` con la tabla de métricas y el detalle por caso (RF-77).
+6. Cada corrida genera `eval/resultados/<fecha>_<commit>.md` con la tabla de métricas y el detalle por caso
+   (RF-73), y un `.json` con el detalle completo. Los dos se versionan, para comparar corridas (RF-75).
 
 ### 9.4 Evaluadores (`eval/evaluadores.py`)
 
@@ -680,86 +662,12 @@ un socio en cada sede.
 
 ---
 
-## 10. Arranque automatizado (`start.py`, RNF-07)
+## 10. Configuración (`.env.example`, RNF-06)
 
-Objetivo: desde un clon recién bajado, **un solo comando** deja todo funcionando: entorno de
-Python, configuración, contenedor, base creada y cargada, PDFs indexados e interfaz abierta en el
-navegador.
+El arranque automatizado (`start.py`, entorno virtual, Docker) y el README quedan fuera del SDD: responden al criterio de aprobación "código documentado y reproducible", no al agente. Acá queda solo la configuración que lee el agente.
 
 ```
-python start.py [--reindexar] [--sin-ui] [--evaluar] [--mantener-db] [--reinstalar]
-```
-
-El script está en la **raíz** del repositorio. La parte de preparación (fase A) usa solo la
-biblioteca estándar, así que se puede ejecutar con el Python del sistema antes de que exista el
-entorno virtual.
-
-### 10.1 Lo único que se hace a mano
-
-| Requisito | Por qué no se automatiza |
-|---|---|
-| Python 3.12 o superior | Es el intérprete que ejecuta el script. |
-| Docker Desktop (Windows o macOS) o Docker Engine (Linux), instalado | Instalarlo requiere permisos de administrador. Sí se automatiza **iniciarlo** si está apagado (paso 5). |
-| API key de Gemini y, si se quieren trazas, de LangSmith | Son credenciales personales. El script las pide la primera vez y las guarda en `.env`. |
-
-### 10.2 Pasos
-
-**Fase A: preparación (solo biblioteca estándar)**
-
-1. **Python:** verifica que la versión sea 3.12 o superior; si no, termina con un mensaje que dice
-   qué versión se necesita.
-2. **Entorno virtual:** si no existe `.venv`, o si cambió el hash de `requirements.txt` (guardado
-   en `.venv/.requirements.sha256`), o si se pasa `--reinstalar`, crea `.venv` e instala las
-   dependencias. Después **se vuelve a ejecutar a sí mismo** con el Python de `.venv`, pasando los
-   mismos argumentos.
-3. **Configuración:** si no existe `.env`, lo crea a partir de `.env.example`. Los secretos internos
-   que estén vacíos (`POSTGRES_PASSWORD`, `DB_PASS_*` y `PSEUDONIMO_SECRET`) se generan con
-   `secrets.token_urlsafe()`. Nunca se pisa un valor que ya existe.
-4. **API keys:** si falta `GOOGLE_API_KEY` y la terminal es interactiva, la pide con `getpass` y la
-   guarda en `.env`; si la terminal no es interactiva, termina indicando qué variable falta. Con
-   `LANGSMITH_API_KEY` hace lo mismo, pero se puede dejar vacía: en ese caso pone
-   `LANGSMITH_TRACING=false` y avisa que la app funciona sin trazas.
-
-**Fase B: infraestructura**
-
-5. **Docker:** ejecuta `docker info`. Si el daemon no responde:
-   - en Windows, inicia Docker Desktop (ruta por defecto en `Program Files`);
-   - en macOS, ejecuta `open -a Docker`;
-   - en Linux, indica el comando para iniciarlo (`sudo systemctl start docker`), porque requiere permisos.
-
-   Espera hasta 120 segundos a que responda. Si `docker` no está instalado, termina con un link a la
-   instalación.
-6. **Puerto:** si `DB_PORT` está ocupado por otro proceso, usa el siguiente puerto libre durante
-   esta ejecución (se lo pasa como variable de entorno a los procesos hijos) y lo informa.
-7. **Contenedor desde cero:** `docker compose down --remove-orphans` y después
-   `docker compose up -d --wait db`. `--wait` espera a que el `healthcheck` esté en `healthy`
-   (timeout de 90 segundos).
-8. **Base de datos:** ejecuta `reset_db` (§4.2): crea `gimnasio_template`, corre los 4 scripts SQL
-   en orden y clona `gimnasio`. Al terminar imprime la cantidad de registros por tabla, como
-   verificación rápida de R-03.
-9. **RAG:** indexa los PDFs si cambió algún hash o si se pasa `--reindexar` (§8.1).
-
-**Fase C: ejecución**
-
-10. Depende del flag:
-    - **por defecto:** `streamlit run app/ui/app.py`, que abre el navegador automáticamente.
-      Antes imprime la URL y **un DNI de ejemplo por perfil** (un socio, un administrador central
-      y un administrador de sede), consultados en la base, para poder ingresar enseguida;
-    - con `--evaluar`: ejecuta la evaluación completa (§9.3) en lugar de la interfaz;
-    - con `--sin-ui`: termina dejando la base levantada (para correr tests o consultas a mano).
-11. **Salida:** al cerrar con Ctrl+C, o si falla un paso posterior al 7, ejecuta `docker compose down`,
-    salvo que se pase `--mantener-db`.
-
-Cada paso imprime `[n/11] <qué hace> … OK (x,y s)`. Si un paso falla, se corta con un mensaje que
-dice qué falló y cómo resolverlo, sin traceback (salvo con la variable `DEBUG=1`).
-
-La segunda ejecución y las siguientes saltean los pasos 2 a 4 y el 9 si no hubo cambios, así
-que el arranque normal tarda lo que tardan el contenedor y la carga de datos.
-
-### 10.3 Configuración (`.env.example`, RNF-06)
-
-```
-GOOGLE_API_KEY=             # start.py la pide la primera vez
+GOOGLE_API_KEY=
 GEMINI_MODEL_FAST=gemini-3.1-flash-lite
 GEMINI_MODEL_MAIN=gemini-3.5-flash-lite
 GEMINI_MODEL_JUEZ=gemini-3.1-flash-lite
@@ -779,29 +687,15 @@ CHROMA_DIR=.chroma
 RAG_TOP_K=5
 RAG_DISTANCIA_MAX=0.45
 
-LANGSMITH_TRACING=true
-LANGSMITH_API_KEY=          # opcional: vacía = sin trazas
-LANGSMITH_PROJECT=gimnasio-agente
-
 PSEUDONIMO_SECRET=          # se genera si está vacío
 EVAL_RPM=12
 ```
 
 ---
 
-## 11. Interfaz (Streamlit)
+## 11. Interfaz
 
-| Elemento | Implementación | Requisitos |
-|---|---|---|
-| Ingreso | `st.radio` (perfil), `st.text_input` (DNI) y botón; llama a `auth.identificar()`. Si falla, mensaje genérico. | RF-50, RF-51, RF-61 |
-| Sesión | `st.session_state`: `usuario`, `historial` (solo visual), `propuesta_pendiente` (con su `thread_id`) | RF-21, RF-62 |
-| Chat | `st.chat_message` y `st.chat_input`; `st.status("Procesando…")` mientras corre el grafo | RF-62 |
-| Detalle | `st.expander("Detalle")` con la ruta, las herramientas, la SQL (solo admin) y los fragmentos con su cita | RF-63, RF-56 |
-| Tablas | `st.dataframe` con `filas` y la leyenda "Mostrando 50 de N" | RF-03, RF-64 |
-| Propuesta | `st.container(border=True)` con una tabla antes/después, las advertencias y los botones Confirmar y Cancelar (`key` = `thread_id`). Después de decidir, se muestra el resultado y los botones se deshabilitan. | RF-65 |
-| Barra lateral | Perfil, nombre y alcance de sede; preguntas de ejemplo por perfil (botones); limpiar historial; cerrar sesión | RF-62, RF-66, RF-67 |
-
-El grafo se compila una sola vez con `@st.cache_resource`.
+Fuera del SDD: la consigna pide especificar solo el agente. La interfaz consume `RespuestaAgente` y las funciones de entrada del §5.6.
 
 ---
 
@@ -818,7 +712,6 @@ El grafo se compila una sola vez con `@st.cache_resource`.
 | `test_grafo_rutas.py` | Con el LLM simulado: cada ruta recorre los nodos esperados; con perfil socio nunca se llega a `extraer_operacion` | — |
 | `test_datos.py` | Los casos necesarios de los datos (§9.4) | Docker |
 | `test_catalogos.py` | Los catálogos cubren todas las tablas o vistas y sus ejemplos se ejecutan con el rol del perfil | Docker |
-| `test_ui.py` | Interfaz con `streamlit.testing.AppTest` y LLM simulado: ingreso, detalle, tarjeta, Confirmar, Cancelar y descarte | Docker |
 | `test_evaluacion.py` | Comparación de valores, evaluadores y runner de escritura con LLM simulado | Docker (parcial) |
 
 Los tests que llaman a Gemini se marcan con `@pytest.mark.llm` y no corren por defecto.
@@ -836,13 +729,11 @@ Los tests que requieren Docker se marcan con `@pytest.mark.db`.
 | RF-14 a RF-19 | §5.2 a §5.4 |
 | RF-20 a RF-23 | §5.4, §5.5, prompts de `sintetizar` |
 | RF-40 a RF-49, OP-01 a OP-05 | §5.3, §7, §4.5 |
-| RF-50 a RF-57 | `app/auth.py`, §4.3, §4.4, §5.6 |
-| RF-60 a RF-67 | §11 |
-| RF-70 a RF-77 | §9 |
+| RF-50 a RF-56 | `app/auth.py`, §4.3, §4.4, §5.6 |
+| RF-72 a RF-76 | §9 |
 | RNF-01, RNF-02 | §4.3, §4.4, §6.2, §6.3, §7.3 |
 | RNF-03 | §7.3 |
-| RNF-04 a RNF-06 | §1.1, §5.3, §10.1 |
-| RNF-07, RNF-08 | §10 (`start.py`), README, docstrings y prompts en `app/agent/prompts/` |
+| RNF-04 a RNF-06 | §1.1, §5.3, §10 |
 | D-01 | §4.6, `test_datos.py` |
 
 ---
@@ -855,6 +746,7 @@ Los tests que requieren Docker se marcan con `@pytest.mark.db`.
 | DT-02 | ¿Qué DNI se usa en cada caso de evaluación y en las preguntas de ejemplo? | Se eligen de los datos cargados, un socio representativo de cada situación, y quedan documentados en el encabezado de `eval/casos.yaml` y en el README. | Cerrada |
 | DT-03 | En la **suspensión**, ¿qué membresías se cancelan? | La `activa`, la `congelada` y la `pendiente` con `fecha_fin >= hoy`. Un socio suspendido no puede usar ninguna. Se refleja en OP-03 del spec funcional (v0.4). | Cerrada |
 | DT-04 | Valor de `RAG_DISTANCIA_MAX` | `0.45`. Con `gemini-embedding-001` las distancias coseno están muy juntas: el mejor fragmento relevante queda entre 0,18 y 0,25, pero otros fragmentos necesarios aparecen hasta 0,36 (la tabla de sanciones de DOC-01 §7 para "¿qué pasa si un socio presta su QR?"), y los de un tema no cubierto (mascotas, CA-24) arrancan en 0,27. El umbral no separa por sí solo: se deja permisivo (0,35 cortaba fragmentos necesarios) y `sintetizar` decide si los fragmentos cubren la pregunta (RF-11). | Cerrada |
+| DT-05 | ¿Se cumple RNF-04 (p90 < 15 s) con los modelos del plan gratuito? | No. Corrida completa del 03/10/2026 (`eval/resultados/2026-10-03_2046_f00bf93.md`, 58 casos): mediana 11,5 s y p90 40,4 s. La cola la arman las demoras de Gemini, no el grafo: los 6 casos de más de 40 s tuvieron una llamada colgada hasta el timeout de 30 s y un reintento, y hubo 8 timeouts y 7 respuestas 503 en total. Sin los casos con incidentes de Gemini (45 de 58), la mediana es 10,6 s y el p90 24,9 s, todavía por encima del objetivo: los modelos *lite* del plan gratuito tardan de 4 a 8 s por llamada y una consulta de datos o híbrida encadena 3 o 4. Se mantiene el timeout de 30 s: bajarlo recorta la cola, pero hace reintentar respuestas largas que sí iban a llegar. Se acepta como limitación conocida (DC-10 del spec funcional); con un modelo pago o un plan con más cuota, el objetivo es alcanzable sin cambios de diseño. | Cerrada |
 
 ---
 
@@ -867,3 +759,4 @@ Los tests que requieren Docker se marcan con `@pytest.mark.db`.
 | 0.3 | 2026-10-03 | §10: arranque totalmente automatizado con `start.py` en la raíz (entorno virtual, `.env` con secretos generados, pedido de API keys, inicio de Docker, puerto libre, `--wait`, DNI de ejemplo y `--evaluar`). |
 | 0.4 | 2026-10-03 | Ajustes de implementación: extensión `unaccent` en el esquema `ext`, zona horaria fija en las conexiones y auditoría sin `RETURNING` (§4.3); función `socio_api.socio_sesion()` y columna `con_reemplazo` (§4.4); regla de datos para CA-58 (§4.6); claves extra del estado y de `RespuestaAgente` y funciones de entrada (§5.1, §5.6); `sintetizar` diferido y ruta conservada en el rechazo por permisos (§5.3); `CambiosSocio` en lugar de `dict` y avisos con plantillas es/en (§7.1); precisiones de sede y membresía pendiente (§7.2); runner de evaluación local con registro posterior en LangSmith y `EVAL_RPM` como límite de requests a Gemini (§9.3); tests adicionales (§12). |
 | 0.5 | 2026-10-03 | §1.1: modelos del plan gratuito según los límites relevados en AI Studio (los *flash* tienen 20 RPD; se pasa a `gemini-3.5-flash-lite` como principal y `gemini-3.1-flash-lite` como rápido y juez, 500 RPD cada uno), modelo juez separado, corte ante la cuota diaria, `thinking_budget=0` solo en el rápido y timeout de 30 s. Se cierran DT-02 y DT-04 (`RAG_DISTANCIA_MAX=0.45`). |
+| 0.6 | 2026-10-04 | Cierre: DT-05 (RNF-04 medido en la corrida completa y aceptado como limitación del plan gratuito). §11: la interfaz queda fuera del SDD (la consigna lo pide solo para el agente); se quitan T-04, la tabla de Streamlit, `app/ui/` del §3, `test_ui.py` del §12 y la fila de RF-60 a RF-67 de la trazabilidad, y §2, §5.5 y §5.6 se redactan sin depender de la interfaz. Por el mismo motivo salen el arranque y la infraestructura (T-14, §4.1 y §10 quedan como notas; §10 conserva solo la configuración) y las trazas (§9.1 queda como nota; T-05 pasa a ser el runner propio de evaluación, con LangSmith opcional). Se quitan las referencias a RF-77 (eliminado del spec funcional v0.5). |

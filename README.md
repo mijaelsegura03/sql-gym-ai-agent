@@ -168,5 +168,6 @@ start.py               Arranque completo
 | El puerto 5433 está ocupado | `start.py` usa el siguiente libre y lo informa. Para fijar otro, cambiá `DB_PORT` en `.env`. |
 | Error 429 / `RESOURCE_EXHAUSTED` de Gemini | Es el límite del plan gratuito: el agente reintenta con espera creciente. Para la evaluación, bajá `EVAL_RPM` en `.env`. |
 | `Falta GOOGLE_API_KEY` | Pegala en `.env` o ejecutá `python start.py` en una terminal interactiva. |
+| `Could not install packages due to an OSError: [Errno 2] No such file or directory` (Windows) | La ruta del repositorio es demasiado larga: algunas dependencias superan el límite de 260 caracteres de Windows dentro de `.venv`. Cloná el repositorio en una carpeta más corta (por ejemplo `C:\Users\<usuario>\Documents\sql-gym-ai-agent`) y ejecutá `python start.py --reinstalar`. |
 | Los PDFs cambiaron | `python start.py --reindexar`. |
 | Quiero ver el detalle de un error | `DEBUG=1 python start.py` (PowerShell: `$env:DEBUG=1; python start.py`). |

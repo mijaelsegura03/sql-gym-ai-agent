@@ -30,7 +30,7 @@ class Clasificacion(BaseModel):
 
 
 class EstadoAgente(TypedDict, total=False):
-    """Estado del grafo LangGraph. El DNI del usuario nunca forma parte del estado (RF-71)."""
+    """Estado del grafo LangGraph. El DNI del usuario nunca forma parte del estado."""
 
     usuario: Usuario
     mensaje: str

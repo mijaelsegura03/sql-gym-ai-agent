@@ -1,4 +1,4 @@
-"""Corre la evaluación completa del agente (spec técnico §9.3; RF-73 a RF-77).
+"""Corre la evaluación completa del agente (spec técnico §9.3; RF-73 a RF-76).
 
 1. Restaura la base de trabajo desde la plantilla (``--reset`` además recrea la plantilla).
 2. Ejecuta cada caso de ``eval/casos.yaml``: primero los de lectura y después los de escritura;
@@ -8,7 +8,7 @@
    ``membresia`` antes y después, y las consultas de verificación.
 3. Respeta ``EVAL_RPM`` (requests por minuto a Gemini).
 4. Calcula las métricas (``eval/evaluadores.py``) y escribe ``eval/resultados/<fecha>_<commit>.md``
-   (y un ``.json`` con el detalle) para el informe (RF-77).
+   (y un ``.json`` con el detalle) (RF-73, RF-75).
 5. Si LangSmith está configurado, sube el dataset ``gimnasio-eval`` y registra la corrida como
    *experiment* (RF-75); las trazas de cada caso quedan en el proyecto de LangSmith.
 
