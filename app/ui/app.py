@@ -210,8 +210,9 @@ def mostrar_detalle(r: RespuestaAgente) -> None:
         if r.sql:  # solo perfil Administrador (RF-56, el filtro está en el agente)
             st.markdown("**SQL ejecutada:**")
             st.code(r.sql, language="sql")
-        if r.citas:
-            st.markdown("**Secciones citadas:** " + ", ".join(r.citas))
+        citas = getattr(r, "citas", [])  # respuestas del historial creadas antes de agregar el campo
+        if citas:
+            st.markdown("**Secciones citadas:** " + ", ".join(citas))
         if r.fragmentos:
             st.markdown("**Fragmentos de documentos usados:**")
             for f in r.fragmentos:
