@@ -2,10 +2,10 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 0.6 |
+| Versión | 0.7 |
 | Estado | Implementado (ajustes de implementación registrados en el historial) |
 | Fecha | 2026-10-04 |
-| Spec funcional de referencia | `sdd/functional/spec.md` v0.5 |
+| Spec funcional de referencia | `sdd/functional/spec.md` v0.6 |
 | Siguiente artefacto | `sdd/tasks.json` |
 
 > Este documento define **cómo** se implementa lo que pide el spec funcional. Cada decisión
@@ -274,6 +274,7 @@ class EstadoAgente(TypedDict):
     herramientas: Annotated[list[str], operator.add]   # "consulta_sql", "busqueda_documentos", "operacion_socio"
     respuesta: str | None
     fuentes: list[str]
+    citas: list[str]                      # "DOC-0X §N" citados en el texto (RF-10)
     # Agregados en la implementación:
     trace_id: str | None                  # run_id de la traza raíz, para la auditoría
     ejecucion: ResultadoEjecucion | None
@@ -293,7 +294,7 @@ El DNI del usuario **no** forma parte del estado; solo su `id` y su seudónimo.
 | `generar_sql` | LLM principal | Genera una sola sentencia `SELECT` a partir del catálogo del perfil, la fecha de hoy y, si hubo un intento anterior, el error obtenido. | RF-01, RF-06, RF-07, RF-08 |
 | `ejecutar_sql` | Herramienta `consulta_sql` | `validar_sql()` y `ejecutar_lectura()` con el rol del perfil (§6). Si falla, vuelve a `generar_sql` hasta 2 veces más. | RF-02, RF-04, RF-05, RNF-05 |
 | `buscar_documentos` | Herramienta `busqueda_documentos` | Busca en Chroma con la consulta en castellano que armó `clasificar` (§8.3). | RF-09, RF-12, RF-13 |
-| `sintetizar` | LLM principal | Redacta la respuesta con las filas o los fragmentos disponibles, en el idioma del mensaje, con citas y fuentes. | RF-10, RF-11, RF-18, RF-19, RF-22 |
+| `sintetizar` | LLM principal | Redacta la respuesta con las filas o los fragmentos disponibles, en el idioma del mensaje. Saca las citas del texto y arma las citas y las fuentes en código (§8.4). | RF-10, RF-11, RF-18, RF-19, RF-22 |
 | `extraer_operacion` | LLM principal, salida estructurada | Convierte el mensaje en una `OperacionSocio` (§7.1). | §5.5 funcional |
 | `validar_operacion` | Determinístico (herramienta `operacion_socio`) | Resuelve el socio, verifica alcance y reglas (§7.2) y arma la `PropuestaCambio`. | RF-41 a RF-45 |
 | `confirmar` | `interrupt()` | Pausa el grafo y devuelve la propuesta a quien llamó al agente. Se reanuda con `Command(resume={"decision": ...})`. | RF-46, RF-47 |
@@ -373,12 +374,13 @@ class RespuestaAgente(BaseModel):
     texto: str
     ruta: str
     herramientas: list[str]
-    fuentes: list[str]
+    fuentes: list[str]               # "base de datos" y/o el título de cada documento citado (RF-19)
+    citas: list[str]                 # "DOC-0X §N" citados, para el detalle (RF-10)
     sql: str | None                  # None si el perfil es socio (RF-56): se filtra en código
     columnas: list[str] | None
     filas: list[dict] | None         # hasta 50 (RF-04)
     total_filas: int | None
-    fragmentos: list[Fragmento]      # doc_id, seccion, pagina, texto
+    fragmentos: list[Fragmento]      # doc_id, titulo_doc, seccion, pagina, texto
     propuesta: PropuestaCambio | None
     thread_id: str
     trace_id: str | None
@@ -579,8 +581,16 @@ castellano, y `sintetizar` responde en el idioma del mensaje manteniendo las cit
 ### 8.4 Citas
 
 `sintetizar` recibe cada fragmento con una etiqueta `[DOC-0X §N, p. P]` y tiene la instrucción de
-citar solo con esas etiquetas. Las fuentes de la respuesta se arman en código con los metadatos de
-los fragmentos citados, no con texto libre del LLM (RF-10, RF-19).
+citar solo con esas etiquetas. Con la respuesta del LLM, el código:
+
+1. Extrae las citas (`DOC-0X §N`) que corresponden a fragmentos recuperados; las inventadas se descartan.
+   Van en `citas` (RF-10).
+2. Saca las etiquetas del texto: el usuario no las ve en la respuesta, sino en el detalle (RF-10).
+3. Arma `fuentes` con "base de datos", si la consulta se ejecutó, y el título de cada documento citado
+   (`titulo_doc` de los metadatos, por ejemplo "Manual de Salud, Apto Médico y Rutinas"), sin repetir y en
+   el orden en que se citaron. Las agrega al final del texto como "Fuente: …" (RF-19).
+
+Nada de esto sale de texto libre del LLM.
 
 ---
 
@@ -760,3 +770,4 @@ Los tests que requieren Docker se marcan con `@pytest.mark.db`.
 | 0.4 | 2026-10-03 | Ajustes de implementación: extensión `unaccent` en el esquema `ext`, zona horaria fija en las conexiones y auditoría sin `RETURNING` (§4.3); función `socio_api.socio_sesion()` y columna `con_reemplazo` (§4.4); regla de datos para CA-58 (§4.6); claves extra del estado y de `RespuestaAgente` y funciones de entrada (§5.1, §5.6); `sintetizar` diferido y ruta conservada en el rechazo por permisos (§5.3); `CambiosSocio` en lugar de `dict` y avisos con plantillas es/en (§7.1); precisiones de sede y membresía pendiente (§7.2); runner de evaluación local con registro posterior en LangSmith y `EVAL_RPM` como límite de requests a Gemini (§9.3); tests adicionales (§12). |
 | 0.5 | 2026-10-03 | §1.1: modelos del plan gratuito según los límites relevados en AI Studio (los *flash* tienen 20 RPD; se pasa a `gemini-3.5-flash-lite` como principal y `gemini-3.1-flash-lite` como rápido y juez, 500 RPD cada uno), modelo juez separado, corte ante la cuota diaria, `thinking_budget=0` solo en el rápido y timeout de 30 s. Se cierran DT-02 y DT-04 (`RAG_DISTANCIA_MAX=0.45`). |
 | 0.6 | 2026-10-04 | Cierre: DT-05 (RNF-04 medido en la corrida completa y aceptado como limitación del plan gratuito). §11: la interfaz queda fuera del SDD (la consigna lo pide solo para el agente); se quitan T-04, la tabla de Streamlit, `app/ui/` del §3, `test_ui.py` del §12 y la fila de RF-60 a RF-67 de la trazabilidad, y §2, §5.5 y §5.6 se redactan sin depender de la interfaz. Por el mismo motivo salen el arranque y la infraestructura (T-14, §4.1 y §10 quedan como notas; §10 conserva solo la configuración) y las trazas (§9.1 queda como nota; T-05 pasa a ser el runner propio de evaluación, con LangSmith opcional). Se quitan las referencias a RF-77 (eliminado del spec funcional v0.5). |
+| 0.7 | 2026-10-04 | §8.4: las citas se sacan del texto de la respuesta y viajan en `citas` (estado y `RespuestaAgente`); `fuentes` usa el título de cada documento citado (`titulo_doc` en `Fragmento`). Sigue a la v0.6 del spec funcional. |

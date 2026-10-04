@@ -1,10 +1,10 @@
 {
   "proyecto": "sql-gym-ai-agent — Punto 3 de la consigna",
-  "version": "0.5",
+  "version": "0.6",
   "fecha": "2026-10-04",
   "specs": {
-    "funcional": "sdd/functional/spec.md v0.5",
-    "tecnico": "sdd/technical/spec.md v0.6"
+    "funcional": "sdd/functional/spec.md v0.6",
+    "tecnico": "sdd/technical/spec.md v0.7"
   },
   "convenciones": {
     "estado": "pendiente | en_curso | hecha | bloqueada",
@@ -73,6 +73,7 @@
       "nombre": "Entrega",
       "fecha_objetivo": "2026-10-16",
       "tasks": [
+        "T-34",
         "T-33"
       ]
     }
@@ -1096,6 +1097,53 @@
       "notas": "Corrida completa final el 03/10/2026 (eval/resultados/2026-10-03_2046_f00bf93.md): 58 de 58 casos OK y todas las métricas del §5.8.1 en objetivo (seguridad en 100 % / 0). Los 3 fallos de la corrida de las 18:24 (CA-21 y CA-43 por ruteo, DOC-01-en por el juez) quedaron resueltos con los ajustes de prompts. Objetivos de métricas revisados y mantenidos (DC-01). RAG_DISTANCIA_MAX=0.45 en .env.example (DT-04). RNF-04 medido y reportado: mediana 11,5 s, p90 40,4 s (24,9 s sin los incidentes de Gemini); no se cumple con el plan gratuito y queda como limitación aceptada (DC-10, DT-05)."
     },
     {
+      "id": "T-34",
+      "titulo": "Citas fuera del texto y fuentes por documento",
+      "fase": "M6",
+      "descripcion": "sintetizar saca las etiquetas [DOC-0X §N, p. P] del texto y devuelve las citas aparte (estado y RespuestaAgente.citas); la línea de fuente usa 'base de datos' y el título de cada documento citado. Fragmento incorpora titulo_doc desde los metadatos de Chroma. La evaluación compara fuentes_contienen contra las fuentes y las citas.",
+      "spec_tecnico": [
+        "§5.1",
+        "§5.6",
+        "§8.4"
+      ],
+      "requisitos": [
+        "RF-10",
+        "RF-13",
+        "RF-19"
+      ],
+      "criterios_aceptacion": [
+        "CA-20",
+        "CA-21",
+        "CA-22",
+        "CA-23"
+      ],
+      "archivos": [
+        "app/agent/nodos/sintetizar.py",
+        "app/agent/estado.py",
+        "app/agent/grafo.py",
+        "app/rag/buscador.py",
+        "app/agent/prompts/sintetizar.md",
+        "eval/evaluadores.py",
+        "scripts/run_eval.py",
+        "tests/test_grafo_rutas.py"
+      ],
+      "depende_de": [
+        "T-20",
+        "T-21",
+        "T-29"
+      ],
+      "definicion_de_hecho": [
+        "El texto de las respuestas de documentos e híbridas no contiene etiquetas [DOC-0X …]",
+        "La línea de fuente muestra 'base de datos' y/o el título de cada documento citado, sin secciones",
+        "RespuestaAgente.citas tiene las secciones citadas que corresponden a fragmentos recuperados (las inventadas no entran)",
+        "`pytest` pasa completo y los casos de documentos e híbridos de la evaluación siguen en objetivo"
+      ],
+      "estimacion": "S",
+      "estado": "hecha",
+      "responsable": null,
+      "notas": "Verificado el 04/10/2026: pytest completo (234 passed) y corrida de los 10 casos de documentos e híbridos con Gemini real (eval/resultados/2026-10-04_1302_e327e6f.md): 10 de 10 OK, fidelidad y corrección RAG al 100 %, sin etiquetas en el texto y con el título del documento en la fuente."
+    },
+    {
       "id": "T-33",
       "titulo": "Cierre de artefactos SDD",
       "fase": "M6",
@@ -1123,7 +1171,7 @@
       "estimacion": "S",
       "estado": "hecha",
       "responsable": null,
-      "notas": "Specs cerrados (funcional v0.5, técnico v0.6), sin decisiones abiertas. Trazabilidad verificada el 03/10/2026 y actualizada el 04/10/2026: los 56 RF, RNF y OP del spec funcional están cubiertos por al menos una task; los 56 CA se verifican: 50 con casos de eval/casos.yaml, CA-80, CA-81 y CA-86 con test_auth.py y CA-82 a CA-84 con test_grafo_rutas.py. El 04/10/2026 se quitó del SDD lo que la consigna no pide desarrollar con SDD (solo el agente): el informe técnico (T-32, RF-77), la interfaz (M4: T-25 a T-27; RF-57, RF-60 a RF-67), el arranque, la infraestructura y el README (T-02, T-07, T-31; RNF-07, RNF-08) y las trazas (T-24; RF-70, RF-71, CA-85). Todo eso sigue en el repositorio, fuera del SDD. No quedan tasks pendientes."
+      "notas": "Specs cerrados (funcional v0.6, técnico v0.7), sin decisiones abiertas. Trazabilidad verificada el 03/10/2026 y actualizada el 04/10/2026: los 56 RF, RNF y OP del spec funcional están cubiertos por al menos una task; los 56 CA se verifican: 50 con casos de eval/casos.yaml, CA-80, CA-81 y CA-86 con test_auth.py y CA-82 a CA-84 con test_grafo_rutas.py. El 04/10/2026 se quitó del SDD lo que la consigna no pide desarrollar con SDD (solo el agente): el informe técnico (T-32, RF-77), la interfaz (M4: T-25 a T-27; RF-57, RF-60 a RF-67), el arranque, la infraestructura y el README (T-02, T-07, T-31; RNF-07, RNF-08) y las trazas (T-24; RF-70, RF-71, CA-85). Todo eso sigue en el repositorio, fuera del SDD. No quedan tasks pendientes."
     }
   ]
 }

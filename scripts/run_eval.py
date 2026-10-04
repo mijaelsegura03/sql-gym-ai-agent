@@ -124,6 +124,7 @@ def ejecutar_caso(caso: dict) -> dict:
         "herramientas": r.herramientas,
         "nodos": r.nodos + (final.nodos if final is not r else []),
         "fuentes": r.fuentes,
+        "citas": r.citas,
         "sql": r.sql,
         "filas": r.filas,
         "total_filas": r.total_filas,

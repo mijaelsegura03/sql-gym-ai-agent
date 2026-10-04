@@ -55,7 +55,8 @@ def entorno(monkeypatch):
     """Grafo nuevo con herramientas en memoria. Devuelve un objeto para configurar y registrar llamadas."""
     e = SimpleNamespace(lecturas=[], busquedas=[], ejecuciones=[], auditoria=[],
                         resultado_sql=ResultadoLectura(sql="SELECT 1", columnas=["n"], filas=[{"n": 1}], total_filas=1),
-                        fragmentos=[Fragmento(doc_id="DOC-04", seccion="1. Apto médico", pagina=1, texto="t\nDura 12 meses.")],
+                        fragmentos=[Fragmento(doc_id="DOC-04", seccion="1. Apto médico", pagina=1, texto="t\nDura 12 meses.",
+                                              titulo_doc="Manual de Salud, Apto Médico y Rutinas")],
                         validacion=None)
 
     def leer(sql, usuario):
@@ -151,7 +152,10 @@ def test_ruta_documentos_con_citas_desde_metadatos(entorno):
     r = modulo_grafo.responder(SOCIO, "¿Cuánto dura el apto médico?", HOY)
     assert r.nodos == ["clasificar", "buscar_documentos", "sintetizar"]
     assert r.herramientas == ["busqueda_documentos"] and entorno.busquedas == ["vigencia del apto"]
-    assert r.fuentes == ["DOC-04 §1"]  # la cita inventada (DOC-09) no entra en las fuentes
+    assert r.citas == ["DOC-04 §1"]  # la cita inventada (DOC-09) no entra
+    assert r.fuentes == ["Manual de Salud, Apto Médico y Rutinas"]  # el título, sin secciones (RF-19)
+    assert "[DOC" not in r.texto and r.texto.startswith("Dura 12 meses. Además.")  # RF-10
+    assert r.texto.endswith("*Fuente: Manual de Salud, Apto Médico y Rutinas*")
 
 
 def test_ruta_hibrida_en_paralelo_y_sintetiza_una_vez(entorno):
@@ -160,7 +164,8 @@ def test_ruta_hibrida_en_paralelo_y_sintetiza_una_vez(entorno):
     r = modulo_grafo.responder(SOCIO, "Con mi apto médico, ¿qué clases me recomiendan?", HOY)
     assert set(r.herramientas) == {"consulta_sql", "busqueda_documentos"}
     assert r.nodos.count("sintetizar") == 1 and r.nodos[-1] == "sintetizar"
-    assert r.fuentes == ["base de datos", "DOC-04 §1"]
+    assert r.fuentes == ["base de datos", "Manual de Salud, Apto Médico y Rutinas"] and r.citas == ["DOC-04 §1"]
+    assert "[DOC" not in r.texto
 
 
 def test_ruta_hibrida_espera_los_reintentos_de_sql(entorno):
@@ -286,3 +291,14 @@ def test_varias_citas_en_un_corchete():
     fr = [Fragmento(doc_id="DOC-04", seccion="9. Preguntas frecuentes — x", pagina=4, texto="t"),
           Fragmento(doc_id="DOC-04", seccion="1. Apto médico", pagina=1, texto="t")]
     assert fuentes_citadas("Dura 12 meses [DOC-04 §9, p. 4; DOC-04 §1, p. 1].", fr) == ["DOC-04 §9", "DOC-04 §1"]
+
+
+def test_quitar_citas_y_documentos_citados():
+    from app.agent.nodos.sintetizar import documentos_citados, quitar_citas
+
+    assert quitar_citas("Dura 12 meses [DOC-04 §9, p. 4] [DOC-04 §1, p. 1]. Renovalo antes [DOC-04 §1, p. 1].") == \
+        "Dura 12 meses. Renovalo antes."
+    fr = [Fragmento(doc_id="DOC-04", seccion="1. Apto", pagina=1, texto="t", titulo_doc="Manual de Salud"),
+          Fragmento(doc_id="DOC-04", seccion="9. FAQ", pagina=4, texto="t", titulo_doc="Manual de Salud"),
+          Fragmento(doc_id="DOC-02", seccion="9. Congelamiento", pagina=3, texto="t")]
+    assert documentos_citados(["DOC-04 §9", "DOC-02 §9", "DOC-04 §1"], fr) == ["Manual de Salud", "DOC-02"]

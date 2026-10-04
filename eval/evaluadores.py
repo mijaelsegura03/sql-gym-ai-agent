@@ -229,7 +229,8 @@ def evaluar_caso(caso: dict, salida: dict, usar_juez: bool = True) -> dict[str, 
 
     # RAG: fidelidad y corrección
     if cat in ("documentos", "hibrida"):
-        fuentes_ok = all(any(contiene(f, esperada) for f in salida.get("fuentes") or [])
+        citadas = (salida.get("fuentes") or []) + (salida.get("citas") or [])
+        fuentes_ok = all(any(contiene(f, esperada) for f in citadas)
                          for esperada in esperado.get("fuentes_contienen", []))
         if not fuentes_ok:
             errores.append(f"fuentes {salida.get('fuentes')} sin {esperado.get('fuentes_contienen')}")

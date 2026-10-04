@@ -2,7 +2,7 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 0.5 |
+| Versión | 0.6 |
 | Estado | Final: implementado y evaluado (sin decisiones abiertas) |
 | Fecha | 2026-10-04 |
 | Alcance | Punto 3 de la consigna (`consigna/enunciado_tp_2026.md`) |
@@ -96,7 +96,7 @@ las tres sedes (DC-03).
 | Operación de escritura | Cambio en la base que solo puede pedir un administrador, dentro del catálogo del §5.5. |
 | Propuesta de cambio | Resumen de una operación de escritura que el agente muestra **antes** de ejecutarla, para que el administrador la confirme o la cancele. |
 | Alcance de sede | Conjunto de socios sobre los que un administrador puede escribir (§2.1). |
-| Cita | Referencia al documento y la sección de donde sale una afirmación. |
+| Cita | Referencia al documento y la sección de donde sale una afirmación. No se muestra en el texto de la respuesta (RF-10). |
 | Sesión de usuario | El período durante el que el usuario identificado usa el agente. |
 
 ---
@@ -147,10 +147,10 @@ las tres sedes (DC-03).
 | ID | Requisito |
 |---|---|
 | RF-09 | El agente responde preguntas de políticas con el contenido de los 4 PDFs. |
-| RF-10 | Toda afirmación que salga de un documento lleva una **cita**: el documento (DOC-0X) y la sección o página. |
+| RF-10 | Toda afirmación que salga de un documento se apoya en un fragmento recuperado y queda registrada como **cita**: el documento (DOC-0X) y la sección o página. Las citas no aparecen en el texto de la respuesta: la respuesta las incluye aparte, junto con los fragmentos usados, para consultarlas en el detalle. |
 | RF-11 | Si los documentos no cubren la pregunta, el agente lo dice y no completa con conocimiento general como si fuera una política del gimnasio. |
 | RF-12 | El agente puede combinar fragmentos de varios documentos en una misma respuesta (por ejemplo, condiciones de ingreso de DOC-01 más vigencia del apto de DOC-04). |
-| RF-13 | Si la pregunta está en inglés, el agente responde en inglés aunque los documentos estén en castellano, y mantiene las citas. |
+| RF-13 | Si la pregunta está en inglés, el agente responde en inglés aunque los documentos estén en castellano, y mantiene las citas y las fuentes. |
 
 ### 5.3 Ruteo y uso de herramientas
 
@@ -161,7 +161,7 @@ las tres sedes (DC-03).
 | RF-16 | **Fuera de dominio, sin herramientas.** Las preguntas que no tienen relación con el gimnasio ("¿Quién ganó el último mundial?") se rechazan con amabilidad, sin invocar herramientas, indicando qué tipo de consultas sí se pueden hacer. |
 | RF-17 | **Mensajes mixtos.** Si un mensaje combina un saludo con una consulta real ("Hola, ¿cuándo vence mi cuota?"), la consulta se resuelve normalmente con las herramientas que correspondan. El saludo no hace que se saltee la consulta. |
 | RF-18 | **Regla de fuente de verdad:** los hechos operativos (precios vigentes, horarios y grilla, cupos, estados, fechas, montos) salen de la base. Las reglas, los procedimientos y las explicaciones salen de los documentos. Los propios documentos indican que precios y horarios se consultan en el sistema (DOC-02 §Resumen, DOC-03 §Resumen). Si la base y un documento parecen contradecirse, el agente prioriza la base para los hechos y menciona la diferencia. |
-| RF-19 | La respuesta indica qué fuente o fuentes se usaron (por ejemplo: "Fuente: base de datos", "Fuente: DOC-02 §9"). En las respuestas directas no se indica ninguna fuente. |
+| RF-19 | La respuesta termina indicando qué fuente o fuentes se usaron: "base de datos" y el nombre de cada documento citado, sin secciones ni páginas (por ejemplo: "Fuente: base de datos · Política de Membresías, Pagos y Bajas"). En las respuestas directas no se indica ninguna fuente. |
 
 ### 5.4 Idioma y forma de la respuesta
 
@@ -294,10 +294,10 @@ Los ejemplos se usan como base del conjunto de evaluación (RF-72). "Admin" es u
 
 | ID | Perfil | Mensaje | Entonces |
 |---|---|---|---|
-| CA-20 | Socio | ¿Cuánto dura el apto médico? | 12 meses desde la emisión; se recomienda renovarlo 30 días antes. Cita DOC-04. |
-| CA-21 | Socio | ¿Puedo congelar mi membresía? ¿Por cuánto tiempo? | Mínimo 7 y máximo 30 días por año, con 48 h de aviso, etc. Cita DOC-02 §9. |
-| CA-22 | Admin | ¿Qué pasa si un socio presta su QR? | Falta grave: suspensión inmediata y evaluación de baja. Cita DOC-01 §7. |
-| CA-23 | Socio | Can I cancel a class booking without penalty? | En inglés: hasta 2 horas antes. Cita DOC-03 §5. |
+| CA-20 | Socio | ¿Cuánto dura el apto médico? | 12 meses desde la emisión; se recomienda renovarlo 30 días antes. Fuente: Manual de Salud, Apto Médico y Rutinas (cita DOC-04). |
+| CA-21 | Socio | ¿Puedo congelar mi membresía? ¿Por cuánto tiempo? | Mínimo 7 y máximo 30 días por año, con 48 h de aviso, etc. Fuente: Política de Membresías, Pagos y Bajas (cita DOC-02 §9). |
+| CA-22 | Admin | ¿Qué pasa si un socio presta su QR? | Falta grave: suspensión inmediata y evaluación de baja. Fuente: Reglamento Interno y Normas de Acceso (cita DOC-01 §7). |
+| CA-23 | Socio | Can I cancel a class booking without penalty? | En inglés: hasta 2 horas antes. Fuente: Guía de Clases Grupales y Reservas (cita DOC-03 §5). |
 | CA-24 | Socio | ¿Se puede ir con mascotas al gimnasio? | Los documentos no lo cubren: lo dice y no inventa una política (RF-11). |
 
 ### 7.4 Híbridas (ruta: consulta híbrida)
@@ -404,6 +404,7 @@ Los ejemplos se usan como base del conjunto de evaluación (RF-72). "Admin" es u
 | 0.3 | 2026-10-03 | Se cierran las decisiones abiertas (§9, DC-01 a DC-08). Recepción pasa a tener el perfil Administrador. La baja se rechaza si el socio tiene una membresía activa o congelada, y cancela la pendiente (OP-05, CA-58, CA-71, CA-72). Datos con fechas fijas, agente con la fecha real y base recreada en cada ejecución (RF-06, RF-74, RF-76, S-05, D-01). Se agrega CA-86. |
 | 0.4 | 2026-10-03 | OP-03: la suspensión cancela las membresías activa, congelada y pendiente (decisión DT-03 del spec técnico). |
 | 0.5 | 2026-10-04 | Cierre. Se revisan los objetivos de métricas tras la evaluación (DC-01): se mantienen. DC-09: las 4 tablas de catálogo con menos de 15 registros quedan como riesgo aceptado (R-03). DC-10: RNF-04 no se cumple con el plan gratuito de Gemini y queda como limitación conocida. Se quita RF-77: el informe técnico no forma parte del SDD (la consigna lo pide solo para el agente). Por el mismo motivo, la interfaz gráfica sale del spec: se quitan RF-57 y RF-60 a RF-67 (§5.7 queda como nota de alcance), y RF-03, RF-46, RF-47, RF-51, RF-56 y los CA del §7.8 se redactan sobre la respuesta del agente en lugar de la pantalla. También salen el arranque, la infraestructura y la documentación (RNF-07, RNF-08) y las trazas (RF-70, RF-71, CA-85); §5.8 queda solo con la evaluación, y RF-49, S-07, DC-08, CA-01 y CA-43 dejan de apoyarse en las trazas. |
+| 0.6 | 2026-10-04 | RF-10, RF-13 y RF-19: las citas (documento y sección) dejan de aparecer en el texto de la respuesta y quedan en su detalle; la línea de fuente indica "base de datos" y el nombre de cada documento citado, sin secciones. Se ajustan el glosario y CA-20 a CA-23. |
 
 ---
 

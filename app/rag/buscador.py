@@ -25,6 +25,7 @@ class Fragmento(BaseModel):
     pagina: int
     texto: str
     distancia: float | None = None
+    titulo_doc: str = ""
 
     @property
     def numero_seccion(self) -> str:
@@ -39,8 +40,13 @@ class Fragmento(BaseModel):
 
     @property
     def fuente(self) -> str:
-        """Fuente para mostrar en la respuesta: ``DOC-01 §4``."""
+        """Cita sin página, para el detalle de la respuesta: ``DOC-01 §4``."""
         return f"{self.doc_id} {self.numero_seccion}"
+
+    @property
+    def documento(self) -> str:
+        """Nombre del documento para la línea de fuente (RF-19); ``doc_id`` si falta el título."""
+        return self.titulo_doc or self.doc_id
 
 
 @lru_cache(maxsize=1)
@@ -68,5 +74,6 @@ def buscar(consulta: str, k: int | None = None, distancia_max: float | None = No
         if dist > distancia_max:
             continue
         fragmentos.append(Fragmento(doc_id=meta["doc_id"], seccion=meta["seccion"], pagina=int(meta["pagina"]),
-                                    texto=texto, distancia=round(float(dist), 4)))
+                                    texto=texto, distancia=round(float(dist), 4),
+                                    titulo_doc=meta.get("titulo_doc", "")))
     return fragmentos

@@ -57,6 +57,7 @@ class EstadoAgente(TypedDict, total=False):
     nodos: Annotated[list[str], operator.add]         # recorrido, para el detalle y los tests
     respuesta: str | None
     fuentes: list[str]
+    citas: list[str]                                  # "DOC-0X §N" citados (RF-10)
     ruta_final: str | None
 
 
@@ -67,7 +68,8 @@ class RespuestaAgente(BaseModel):
     ruta: str
     idioma: str = "es"
     herramientas: list[str] = []
-    fuentes: list[str] = []
+    fuentes: list[str] = []            # "base de datos" y/o el título de cada documento citado (RF-19)
+    citas: list[str] = []              # "DOC-0X §N" citados, para el detalle (RF-10)
     sql: str | None = None             # None si el perfil es socio (RF-56): se filtra en código
     columnas: list[str] | None = None
     filas: list[dict[str, Any]] | None = None   # hasta 50 (RF-04)

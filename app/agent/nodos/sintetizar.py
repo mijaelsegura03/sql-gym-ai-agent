@@ -1,9 +1,12 @@
 """Nodo ``sintetizar`` (spec técnico §5.2, §8.4; RF-05, RF-07, RF-10, RF-11, RF-18, RF-19, RF-22, RF-23).
 
 Redacta la respuesta con las filas de la base y/o los fragmentos de los documentos, en el idioma del
-mensaje. Las **fuentes** se arman en código: "base de datos" si la consulta se ejecutó, y las
-etiquetas ``[DOC-0X §N, p. P]`` que el texto realmente cita y que corresponden a fragmentos
-recuperados (nunca texto libre del LLM).
+mensaje. El LLM cita con las etiquetas ``[DOC-0X §N, p. P]`` y el código, nunca el LLM:
+
+- guarda en ``citas`` las que corresponden a fragmentos recuperados (``DOC-0X §N``, RF-10);
+- las saca del texto, porque el usuario las ve en el detalle y no en la respuesta (RF-10);
+- arma las **fuentes**: "base de datos" si la consulta se ejecutó y el título de cada documento
+  citado, sin secciones (RF-19).
 
 Si la consulta a la base falló después de los reintentos y no hay fragmentos, la respuesta es un
 mensaje fijo y comprensible, sin trazas técnicas y sin llamar al LLM (RF-23).
@@ -29,6 +32,8 @@ _ETIQUETA_FUENTE = {"es": "Fuente", "en": "Source"}
 _BASE = {"es": "base de datos", "en": "database"}
 _RE_CORCHETE = re.compile(r"\[([^\]]*DOC-\d{2}[^\]]*)\]")
 _RE_CITA = re.compile(r"(DOC-\d{2})\s+(§[\wÁÉÍÓÚáéíóúñ]+)")
+_RE_ETIQUETA = re.compile(r"[ \t]*\[[^\]]*DOC-\d{2}[^\]]*\]")
+_RE_ESPACIO_PUNTUACION = re.compile(r"[ \t]+([.,;:)])")
 
 
 def _texto(contenido) -> str:
@@ -84,6 +89,17 @@ def fuentes_citadas(texto: str, fragmentos: list[Fragmento]) -> list[str]:
     return citadas
 
 
+def quitar_citas(texto: str) -> str:
+    """Saca las etiquetas ``[DOC-0X …]`` del texto y el espacio que quedaba antes de la puntuación."""
+    return _RE_ESPACIO_PUNTUACION.sub(r"\1", _RE_ETIQUETA.sub("", texto)).strip()
+
+
+def documentos_citados(citas: list[str], fragmentos: list[Fragmento]) -> list[str]:
+    """Títulos de los documentos de las ``citas``, sin repetir y en el orden en que se citaron."""
+    titulo = {f.fuente: f.documento for f in fragmentos}
+    return list(dict.fromkeys(titulo[c] for c in citas))
+
+
 def sintetizar(estado: EstadoAgente) -> dict:
     """Redacta la respuesta final de las rutas de datos, documentos e híbrida."""
     c = estado["clasificacion"]
@@ -93,11 +109,14 @@ def sintetizar(estado: EstadoAgente) -> dict:
     sql_ok = uso_sql and not estado.get("sql_error")
 
     if uso_sql and not sql_ok and not fragmentos:
-        return {"respuesta": _ERROR_DATOS[idioma], "fuentes": [], "ruta_final": c.ruta, "nodos": ["sintetizar"]}
+        return {"respuesta": _ERROR_DATOS[idioma], "fuentes": [], "citas": [], "ruta_final": c.ruta,
+                "nodos": ["sintetizar"]}
 
     respuesta = con_reintentos(modelos.llm_principal().invoke, armar_prompt(estado))
-    texto = _texto(respuesta.content).strip()
-    fuentes = ([_BASE[idioma]] if sql_ok else []) + fuentes_citadas(texto, fragmentos)
+    crudo = _texto(respuesta.content).strip()
+    citas = fuentes_citadas(crudo, fragmentos)
+    texto = quitar_citas(crudo)
+    fuentes = ([_BASE[idioma]] if sql_ok else []) + documentos_citados(citas, fragmentos)
     if fuentes:
         texto += f"\n\n*{_ETIQUETA_FUENTE[idioma]}: {' · '.join(fuentes)}*"
-    return {"respuesta": texto, "fuentes": fuentes, "ruta_final": c.ruta, "nodos": ["sintetizar"]}
+    return {"respuesta": texto, "fuentes": fuentes, "citas": citas, "ruta_final": c.ruta, "nodos": ["sintetizar"]}

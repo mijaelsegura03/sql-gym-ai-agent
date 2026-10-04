@@ -164,6 +164,7 @@ def _armar_respuesta(grafo, usuario: Usuario, thread_id: str, run_id: uuid.UUID,
         idioma=idioma,
         herramientas=herramientas,
         fuentes=valores.get("fuentes") or [],
+        citas=valores.get("citas") or [],
         sql=valores.get("sql") if usuario.es_admin and "consulta_sql" in herramientas else None,  # RF-56
         columnas=valores.get("columnas"),
         filas=valores.get("filas"),
@@ -216,7 +217,7 @@ def responder(usuario: Usuario, mensaje: str, hoy: date | None = None) -> Respue
     thread_id, run_id, t0 = str(uuid.uuid4()), uuid.uuid4(), time.perf_counter()
     inicial: EstadoAgente = {
         "usuario": usuario, "mensaje": mensaje.strip(), "fecha_hoy": hoy or date.today(), "trace_id": str(run_id),
-        "intentos_sql": 0, "herramientas": [], "nodos": [], "fragmentos": [], "fuentes": [],
+        "intentos_sql": 0, "herramientas": [], "nodos": [], "fragmentos": [], "fuentes": [], "citas": [],
     }
     try:
         salida = grafo.invoke(inicial, _config(usuario, thread_id, run_id))
