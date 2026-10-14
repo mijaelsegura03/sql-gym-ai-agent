@@ -119,3 +119,37 @@ def test_runner_escritura(accion, cambia):
         assert m["escritura"] is True
     else:
         assert m["escritura_sin_confirmacion"] == 0 and m["validacion_escritura"] is True
+
+
+def test_correr_guarda_progreso_y_reanuda(tmp_path, monkeypatch):
+    import scripts.run_eval as run_eval
+
+    monkeypatch.setattr(run_eval, "RESULTADOS", tmp_path)
+    monkeypatch.setattr(run_eval, "PROGRESO", tmp_path / "en_curso.json")
+    monkeypatch.setattr("scripts.reset_db.restaurar", lambda: None)
+    monkeypatch.setattr("eval.evaluadores.evaluar_caso", lambda caso, salida, usar_juez: {})
+    casos = [{"id": f"C-{i}", "categoria": "directa"} for i in range(4)]
+    ejecutados, cuota = [], {"agotada": False}
+
+    def ejecutar(caso):
+        ejecutados.append(caso["id"])
+        if caso["id"] == "C-1":
+            return {"error_ejecucion": "respuesta de error del agente"}
+        if caso["id"] == "C-2":
+            cuota["agotada"] = True
+        return {"duracion_seg": 1.0}
+
+    monkeypatch.setattr(run_eval, "ejecutar_caso", ejecutar)
+    monkeypatch.setattr(run_eval, "cuota_agotada", lambda: cuota["agotada"])
+    progreso = {"commit": "abc", "fecha": "2026-10-14T10:00:00", "casos": None, "usar_juez": False, "resultados": []}
+    resultados, completa = run_eval.correr(casos, usar_juez=False, progreso=progreso)
+    assert not completa and [r["caso"]["id"] for r in resultados] == ["C-0", "C-1"]
+
+    # Reanuda: saltea C-0, repite C-1 (terminó con error) y sigue con C-2 y C-3.
+    cuota["agotada"], ejecutados[:] = False, []
+    monkeypatch.setattr(run_eval, "ejecutar_caso", lambda caso: ejecutados.append(caso["id"]) or {"duracion_seg": 1.0})
+    progreso = run_eval.cargar_progreso()
+    resultados, completa = run_eval.correr(casos, usar_juez=False, progreso=progreso)
+    assert completa and ejecutados == ["C-1", "C-2", "C-3"]
+    assert [r["caso"]["id"] for r in resultados] == ["C-0", "C-1", "C-2", "C-3"]
+    assert len(run_eval.cargar_progreso()["resultados"]) == 4

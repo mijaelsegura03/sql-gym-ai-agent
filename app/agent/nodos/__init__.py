@@ -38,5 +38,46 @@ class _Modelos:
 
         return llm_principal()
 
+    def invocar(self, rol: str, prompt, esquema=None):
+        """Invoca el modelo del ``rol`` (``"rapido"`` o ``"principal"``) con reintentos.
+
+        El otro modelo queda como respaldo ante saturación, límites por minuto o cuota diaria agotada
+        (:func:`app.llm.con_reintentos`). Con ``esquema`` usa salida estructurada.
+        """
+        from app.llm import con_reintentos
+
+        def llamada(r: str):
+            llm = self.llm_rapido() if r == "rapido" else self.llm_principal()
+            estructurado = llm.with_structured_output(esquema) if esquema is not None else llm
+
+            def invocar(p):
+                return estructurado.invoke(p)
+
+            invocar.modelo = getattr(llm, "model", r)
+            return invocar
+
+        otro = "principal" if rol == "rapido" else "rapido"
+        return con_reintentos(llamada(rol), prompt, respaldo=_Diferido(lambda: llamada(otro)))
+
+
+class _Diferido:
+    """Llamada que construye su función recién al usarse (el respaldo solo se crea si hace falta)."""
+
+    def __init__(self, fabrica) -> None:
+        self.fabrica = fabrica
+        self._fn = None
+
+    def _resolver(self):
+        if self._fn is None:
+            self._fn = self.fabrica()
+        return self._fn
+
+    @property
+    def modelo(self) -> str:
+        return self._resolver().modelo
+
+    def __call__(self, *args, **kwargs):
+        return self._resolver()(*args, **kwargs)
+
 
 modelos = _Modelos()

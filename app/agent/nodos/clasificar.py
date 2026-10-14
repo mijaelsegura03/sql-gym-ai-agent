@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from app.agent.estado import Clasificacion, EstadoAgente
 from app.agent.nodos import cargar_prompt, modelos
-from app.llm import con_reintentos
 
 _RESPALDO_DIRECTA = {
     "es": "¡Hola! Soy el asistente del gimnasio. ¿En qué te puedo ayudar?",
@@ -46,8 +45,7 @@ def armar_prompt(estado: EstadoAgente) -> str:
 
 def clasificar(estado: EstadoAgente) -> dict:
     """Clasifica el mensaje con el modelo rápido (§5.4)."""
-    llm = modelos.llm_rapido().with_structured_output(Clasificacion)
-    c: Clasificacion = con_reintentos(llm.invoke, armar_prompt(estado))
+    c: Clasificacion = modelos.invocar("rapido", armar_prompt(estado), Clasificacion)
     return {"clasificacion": c, "nodos": ["clasificar"]}
 
 

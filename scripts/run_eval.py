@@ -12,9 +12,13 @@
 5. Si LangSmith está configurado, sube el dataset ``gimnasio-eval`` y registra la corrida como
    *experiment* (RF-75); las trazas de cada caso quedan en el proyecto de LangSmith.
 
+El progreso se guarda en ``eval/resultados/en_curso.json`` después de cada caso. Si la corrida se
+corta (Ctrl+C, cuota diaria agotada, Gemini saturado), ``--reanudar`` la continúa: saltea los casos
+ya evaluados y vuelve a correr los que terminaron con un error del agente.
+
 Uso::
 
-    python scripts/run_eval.py [--reset] [--casos CA-10,CA-20] [--sin-juez] [--sin-langsmith]
+    python scripts/run_eval.py [--reset] [--casos CA-10,CA-20] [--sin-juez] [--sin-langsmith] [--reanudar]
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ from app.config import configurar_trazas, get_settings  # noqa: E402
 
 CASOS = RAIZ / "eval" / "casos.yaml"
 RESULTADOS = RAIZ / "eval" / "resultados"
+PROGRESO = RESULTADOS / "en_curso.json"
 DATASET = "gimnasio-eval"
 CATEGORIAS_ESCRITURA = ("escritura_valida", "escritura_rechazada")
 MENSAJE_OTRO = "Gracias"
@@ -152,16 +157,48 @@ def vencido(caso: dict, hoy: date) -> bool:
     return bool(caso.get("depende_fecha") and caso.get("valido_hasta") and hoy > date.fromisoformat(caso["valido_hasta"]))
 
 
-def correr(casos: list[dict], usar_juez: bool) -> list[dict]:
+def guardar_progreso(progreso: dict) -> None:
+    """Escribe el progreso de la corrida (después de cada caso) para poder reanudarla con ``--reanudar``."""
+    RESULTADOS.mkdir(parents=True, exist_ok=True)
+    tmp = PROGRESO.with_suffix(".tmp")
+    tmp.write_text(json.dumps(progreso, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    tmp.replace(PROGRESO)
+
+
+def cargar_progreso() -> dict | None:
+    """Progreso de la última corrida sin terminar. Descarta los casos con error del agente, que se repiten."""
+    if not PROGRESO.exists():
+        return None
+    progreso = json.loads(PROGRESO.read_text(encoding="utf-8"))
+    progreso["resultados"] = [r for r in progreso["resultados"] if not r["salida"].get("error_ejecucion")]
+    return progreso
+
+
+def correr(casos: list[dict], usar_juez: bool, progreso: dict) -> tuple[list[dict], bool]:
+    """Evalúa los casos que todavía no están en ``progreso`` y lo guarda después de cada uno.
+
+    Devuelve los resultados en el orden de ``casos`` y si la corrida se completó (``False`` si se
+    cortó por la cuota diaria).
+    """
     from eval.evaluadores import evaluar_caso
     from scripts.reset_db import restaurar
 
     hoy = date.today()
-    resultados = []
+    hechos = {r["caso"]["id"]: r for r in progreso["resultados"]}
+
+    def registrar(resultado: dict) -> None:
+        hechos[resultado["caso"]["id"]] = resultado
+        progreso["resultados"].append(resultado)
+        guardar_progreso(progreso)
+
+    completa = True
     for i, caso in enumerate(casos, 1):
+        if caso["id"] in hechos:
+            print(f"[{i}/{len(casos)}] {caso['id']:<12} ya evaluado")
+            continue
         if vencido(caso, hoy):
             print(f"[{i}/{len(casos)}] {caso['id']:<12} OMITIDO (esperado válido hasta {caso['valido_hasta']})")
-            resultados.append({"caso": caso, "salida": {}, "metricas": {}, "omitido": True})
+            registrar({"caso": caso, "salida": {}, "metricas": {}, "omitido": True})
             continue
         escritura = caso["categoria"] in CATEGORIAS_ESCRITURA
         if escritura:
@@ -171,19 +208,21 @@ def correr(casos: list[dict], usar_juez: bool) -> list[dict]:
         except Exception as e:  # noqa: BLE001
             salida = {"error_ejecucion": f"{type(e).__name__}: {e}"}
         if cuota_agotada():
-            print("Se agotó la cuota diaria gratuita de Gemini: la evaluación se corta acá (sin costo).")
+            print("Se agotó la cuota diaria gratuita de Gemini: la evaluación se corta acá (sin costo). "
+                  "Cuando se renueve la cuota, seguila con --reanudar.")
             if escritura:
                 restaurar()
+            completa = False
             break
         if escritura:
             restaurar()
         metricas = evaluar_caso(caso, salida, usar_juez=usar_juez)
         errores = metricas.pop("_errores", [])
         ok = not errores and all(v in (None, True, 0) for v in metricas.values())
-        resultados.append({"caso": caso, "salida": salida, "metricas": metricas, "errores": errores, "ok": ok})
+        registrar({"caso": caso, "salida": salida, "metricas": metricas, "errores": errores, "ok": ok})
         print(f"[{i}/{len(casos)}] {caso['id']:<12} {'OK ' if ok else 'FALLA'} {salida.get('duracion_seg', '-')} s"
               + (f"  ← {'; '.join(errores)[:160]}" if errores else ""), flush=True)
-    return resultados
+    return [hechos[c["id"]] for c in casos if c["id"] in hechos], completa
 
 
 def _pct(v) -> str:
@@ -290,6 +329,8 @@ def main() -> int:
     parser.add_argument("--casos", help="ids separados por coma (por defecto, todos)")
     parser.add_argument("--sin-juez", action="store_true", help="no usar jueces LLM (métricas RAG quedan sin calcular)")
     parser.add_argument("--sin-langsmith", action="store_true", help="no registrar el experiment en LangSmith")
+    parser.add_argument("--reanudar", action="store_true",
+                        help="continuar la última corrida sin terminar (con sus mismos casos y juez)")
     args = parser.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -304,20 +345,41 @@ def main() -> int:
     from eval.evaluadores import resumir
 
     configurar_trazas()
-    inicio = datetime.now()
     commit = commit_actual()
+    if args.reanudar:
+        progreso = cargar_progreso()
+        if progreso is None:
+            print("No hay una evaluación sin terminar para reanudar.")
+            return 1
+        if progreso["commit"] != commit:
+            print(f"Aviso: la corrida empezó con el commit {progreso['commit']} y el código actual es {commit}.")
+        commit = progreso["commit"]
+    else:
+        if PROGRESO.exists():
+            print("Aviso: había una evaluación sin terminar; empieza una nueva (para continuarla, usá --reanudar).")
+        progreso = {"commit": commit, "fecha": datetime.now().isoformat(), "casos": args.casos,
+                    "usar_juez": not args.sin_juez, "resultados": []}
+    inicio = datetime.fromisoformat(progreso["fecha"])
     if args.reset:
         reset()
     else:
         restaurar()  # siempre se parte del estado inicial (RF-74)
     limitar_rpm(get_settings().eval_rpm)
 
-    casos = cargar_casos(set(args.casos.split(",")) if args.casos else None)
-    print(f"Evaluando {len(casos)} casos (EVAL_RPM={get_settings().eval_rpm})…")
-    resultados = correr(casos, usar_juez=not args.sin_juez)
+    casos = cargar_casos(set(progreso["casos"].split(",")) if progreso["casos"] else None)
+    print(f"Evaluando {len(casos)} casos (EVAL_RPM={get_settings().eval_rpm})"
+          + (f"; {len(progreso['resultados'])} ya evaluados en la corrida anterior" if args.reanudar else "") + "…")
+    try:
+        resultados, completa = correr(casos, usar_juez=progreso["usar_juez"], progreso=progreso)
+    except KeyboardInterrupt:
+        restaurar()
+        print(f"\nEvaluación interrumpida: {len(progreso['resultados'])} casos guardados. "
+              "Para seguir: python scripts/run_eval.py --reanudar")
+        return 130
     restaurar()
     resumen = resumir([r for r in resultados if not r.get("omitido")])
-    experimento = None if args.sin_langsmith else registrar_en_langsmith(resultados, commit)
+    # El experiment de LangSmith se registra una sola vez, con la corrida completa.
+    experimento = None if args.sin_langsmith or not completa else registrar_en_langsmith(resultados, commit)
 
     RESULTADOS.mkdir(parents=True, exist_ok=True)
     base = RESULTADOS / f"{inicio:%Y-%m-%d_%H%M}_{commit}"
@@ -330,6 +392,11 @@ def main() -> int:
         valor = m["valor"] if m["tipo"] == "max" else _pct(m["valor"])
         print(f"  {'✔' if m['cumple'] else '✘'} {m['nombre']:<40} {valor}")
     print(f"\nReporte: {base.with_suffix('.md').relative_to(RAIZ)}")
+    if completa:
+        PROGRESO.unlink(missing_ok=True)
+    else:
+        print(f"Reporte parcial ({len(resultados)} de {len(casos)} casos). Para completarlo: "
+              "python scripts/run_eval.py --reanudar")
     return 0
 
 

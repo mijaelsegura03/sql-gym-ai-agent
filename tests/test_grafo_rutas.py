@@ -302,3 +302,19 @@ def test_quitar_citas_y_documentos_citados():
           Fragmento(doc_id="DOC-04", seccion="9. FAQ", pagina=4, texto="t", titulo_doc="Manual de Salud"),
           Fragmento(doc_id="DOC-02", seccion="9. Congelamiento", pagina=3, texto="t")]
     assert documentos_citados(["DOC-04 §9", "DOC-02 §9", "DOC-04 §1"], fr) == ["Manual de Salud", "DOC-02"]
+
+
+def test_clasificar_usa_el_modelo_principal_si_el_rapido_esta_saturado(entorno, monkeypatch):
+    monkeypatch.setattr("app.llm.time.sleep", lambda s: None)
+
+    class Saturado(LLMFalso):
+        def with_structured_output(self, esquema):
+            class _Falla:
+                def invoke(self, prompt):
+                    raise RuntimeError("503 UNAVAILABLE: This model is currently experiencing high demand")
+            return _Falla()
+
+    principal = LLMFalso(estructurado={"Clasificacion": clasif("directa", respuesta_directa="hola")})
+    modelos.rapido, modelos.principal = Saturado(), principal
+    r = modulo_grafo.responder(SOCIO, "hola", HOY)
+    assert not r.error and principal.llamadas == ["Clasificacion"]

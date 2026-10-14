@@ -43,7 +43,7 @@ Verificado en la documentación de Google el 03/10/2026 (ai.google.dev, páginas
 | `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | Indexación y búsqueda | Sí |
 
 - **Límites del plan gratuito:** Google no los publica en la documentación; se ven en AI Studio (`aistudio.google.com/rate-limit`). Relevados el 03/10/2026 para la key del proyecto: los modelos *flash* (`gemini-3.8-flash`, `3.7`, `3.6`, `3.5`, `2.5`) tienen **5 RPM y 20 RPD**; `gemini-3.5-flash-lite` y `gemini-3.1-flash-lite`, **15 RPM y 500 RPD**. Con 20 requests por día el modelo principal original (`gemini-3.8-flash`) no alcanza ni para una evaluación (~180 llamadas al principal), así que se eligieron los dos *lite* de 500 RPD y se reparten los roles entre ellos (la cuota es por modelo).
-- **Sin costo:** el proyecto de la key no tiene facturación (plan *Free*): al superar un límite, Gemini devuelve 429 y no cobra. Todo llamado tiene reintentos con *backoff* exponencial ante 429 por minuto y ante 500/503/504 (saturación de Google, frecuente en estos modelos); el 429 por **límite diario** (`…PerDay…`) no se reintenta: corta con `CuotaDiariaAgotada`, la evaluación se detiene y la interfaz muestra un mensaje claro. La evaluación limita los requests por minuto con `EVAL_RPM` (12).
+- **Sin costo:** el proyecto de la key no tiene facturación (plan *Free*): al superar un límite, Gemini devuelve 429 y no cobra. Todo llamado tiene reintentos con *backoff* exponencial ante 429 por minuto y ante 500/503/504 (saturación de Google, frecuente en estos modelos); Los nodos del agente usan el otro modelo como respaldo (`GEMINI_MODEL_FAST` respalda a `GEMINI_MODEL_MAIN` y viceversa): ante un error transitorio el reintento siguiente va al otro modelo sin esperar, y la espera exponencial se hace al volver al primero. El 429 por **límite diario** (`…PerDay…`) no se reintenta sobre ese modelo: se sigue con el respaldo y, si también lo agotó, corta con `CuotaDiariaAgotada`, la evaluación se detiene y la interfaz muestra un mensaje claro. La evaluación limita los requests por minuto con `EVAL_RPM` (12).
 - **Razonamiento:** el modelo rápido usa `thinking_budget=0` (`GEMINI_THINKING_FAST`), porque clasificar no lo necesita. `gemini-3.5-flash-lite` rechaza `thinking_budget=0` (400 `INVALID_ARGUMENT`) y con un presupuesto bajo no cambia la latencia, así que el principal queda con su valor por defecto.
 - **Uso de los datos:** en el plan gratuito, Google puede usar el contenido para mejorar sus productos. Se acepta porque los datos son sintéticos (S-04).
 - **Parámetros:** `temperature=0` en todos los nodos (los modelos 3.x *lite* usan valores de muestreo fijos e ignoran la temperatura). Timeout de 30 s por llamada, para que una llamada colgada se reintente pronto.
@@ -649,6 +649,10 @@ Fuera del SDD (criterio de observabilidad de la consigna). El agente funciona si
    evaluación). Los casos con `valido_hasta` vencido se omiten y se informan en el reporte.
 6. Cada corrida genera `eval/resultados/<fecha>_<commit>.md` con la tabla de métricas y el detalle por caso
    (RF-73), y un `.json` con el detalle completo. Los dos se versionan, para comparar corridas (RF-75).
+7. Después de cada caso se guarda el progreso en `eval/resultados/en_curso.json` (no versionado). Si la corrida
+   se corta (Ctrl+C, cuota diaria, saturación de Gemini), `--reanudar` la continúa con los mismos casos, juez,
+   commit y fecha: saltea los casos ya evaluados y repite los que terminaron con error del agente. Un corte por
+   cuota deja un reporte parcial; el experiment de LangSmith se registra solo con la corrida completa.
 
 ### 9.4 Evaluadores (`eval/evaluadores.py`)
 

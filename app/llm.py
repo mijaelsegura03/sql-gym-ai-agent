@@ -9,7 +9,9 @@
 Los nombres de los modelos salen siempre de la configuración. El plan gratuito de Gemini tiene
 límites de requests por minuto, así que toda llamada pasa por :func:`con_reintentos`, que
 reintenta ante el error 429 (``RESOURCE_EXHAUSTED``) y los errores transitorios del servidor
-con espera exponencial y un máximo configurable (``LLM_MAX_REINTENTOS``).
+con espera exponencial y un máximo configurable (``LLM_MAX_REINTENTOS``). Los nodos del agente
+pasan además un modelo de respaldo (el rápido respalda al principal y viceversa), así una caída o
+saturación de un modelo no corta la respuesta.
 """
 
 from __future__ import annotations
@@ -90,42 +92,69 @@ def es_reintentable(error: BaseException) -> bool:
     return any(m in texto for m in _MARCAS_REINTENTABLES)
 
 
+def _nombre_modelo(fn: Callable[..., Any]) -> str:
+    """Nombre del modelo detrás de ``fn`` para los logs (``fn.modelo`` o el ``model`` del objeto ligado)."""
+    return getattr(fn, "modelo", None) or getattr(getattr(fn, "__self__", None), "model", None) or "?"
+
+
 def con_reintentos(fn: Callable[..., T], *args: Any, max_reintentos: int | None = None,
                    espera_inicial: float = 2.0, espera_max: float = 60.0,
-                   dormir: Callable[[float], None] = time.sleep, **kwargs: Any) -> T:
+                   dormir: Callable[[float], None] = time.sleep,
+                   respaldo: Callable[..., T] | None = None, **kwargs: Any) -> T:
     """Llama a ``fn(*args, **kwargs)`` y reintenta con *backoff* exponencial si el error es reintentable.
+
+    Con ``respaldo`` (la misma llamada sobre otro modelo), los reintentos alternan entre ambos: la
+    saturación (503) y los límites por minuto (429) son por modelo, así que el otro suele responder.
+    El cambio de modelo es inmediato y la espera se hace al volver al primero. Si un modelo agota su
+    cuota diaria, se sigue solo con el otro.
 
     Args:
         fn: función a invocar (por ejemplo ``modelo.invoke``).
         max_reintentos: máximo de reintentos (por defecto ``LLM_MAX_REINTENTOS``).
-        espera_inicial: espera antes del primer reintento, en segundos; se duplica en cada intento.
+        espera_inicial: espera antes del primer reintento, en segundos; se duplica en cada ronda.
         espera_max: tope de la espera entre intentos.
         dormir: función de espera (inyectable en los tests).
+        respaldo: función alternativa con la misma firma, sobre otro modelo (opcional).
 
     Raises:
+        CuotaDiariaAgotada: si todos los modelos agotaron su cuota diaria.
         La última excepción, si se agotan los reintentos o el error no es reintentable.
     """
     maximo = get_settings().llm_max_reintentos if max_reintentos is None else max_reintentos
-    intento = 0
+    candidatas = [fn] + ([respaldo] if respaldo is not None else [])
+    actual, intento, ronda = 0, 0, 0
     while True:
+        llamada = candidatas[actual]
         try:
             _limite.esperar()
-            return fn(*args, **kwargs)
+            return llamada(*args, **kwargs)
         except Exception as e:  # noqa: BLE001
             if es_cuota_diaria(e):
-                global cuota_diaria_agotada
-                cuota_diaria_agotada = True
-                raise CuotaDiariaAgotada(
-                    "Se agotó la cuota diaria gratuita de Gemini para este modelo; se libera al día siguiente.") from e
+                candidatas.pop(actual)
+                if not candidatas:
+                    global cuota_diaria_agotada
+                    cuota_diaria_agotada = True
+                    raise CuotaDiariaAgotada(
+                        "Se agotó la cuota diaria gratuita de Gemini para este modelo; se libera al día siguiente.") from e
+                log.warning("Gemini (%s) agotó su cuota diaria; sigo con %s", _nombre_modelo(llamada),
+                            _nombre_modelo(candidatas[0]))
+                actual = 0
+                continue
             if intento >= maximo or not es_reintentable(e):
                 raise
-            espera = min(espera_max, espera_inicial * (2 ** intento)) * (0.8 + 0.4 * random.random())
-            modelo = getattr(getattr(fn, "__self__", None), "model", "?")
             codigo = getattr(e, "code", None) or getattr(e, "status_code", None) or type(e).__name__
-            log.warning("Gemini (%s) devolvió %s; reintento %d en %.1f s — %s", modelo, codigo, intento + 1, espera,
-                        " ".join(str(e).split())[:400])
-            dormir(espera)
+            detalle = " ".join(str(e).split())[:400]
             intento += 1
+            actual = (actual + 1) % len(candidatas)
+            if actual != 0:  # paso al modelo de respaldo sin esperar
+                log.warning("Gemini (%s) devolvió %s; reintento %d con %s — %s", _nombre_modelo(llamada), codigo,
+                            intento, _nombre_modelo(candidatas[actual]), detalle)
+                continue
+            espera = min(espera_max, espera_inicial * (2 ** ronda)) * (0.8 + 0.4 * random.random())
+            log.warning("Gemini (%s) devolvió %s; reintento %d con %s en %.1f s — %s", _nombre_modelo(llamada),
+                        codigo, intento, _nombre_modelo(candidatas[actual]), espera, detalle)
+            dormir(espera)
+            ronda += 1
 
 
 def _chat(modelo: str, temperature: float, thinking_budget: int | None = None) -> ChatGoogleGenerativeAI:

@@ -17,7 +17,6 @@ from app.agent.estado import EstadoAgente
 from app.agent.nodos import cargar_prompt, modelos
 from app.config import RAIZ
 from app.db.lectura import ResultadoLectura, ejecutar_lectura
-from app.llm import con_reintentos
 
 MAX_INTENTOS_SQL = 3  # 1 intento + 2 reintentos (RNF-05)
 
@@ -59,7 +58,7 @@ def armar_prompt(estado: EstadoAgente) -> str:
 
 def generar_sql(estado: EstadoAgente) -> dict:
     """Genera la SQL de lectura con el modelo principal."""
-    respuesta = con_reintentos(modelos.llm_principal().invoke, armar_prompt(estado))
+    respuesta = modelos.invocar("principal", armar_prompt(estado))
     return {"sql": extraer_sql(respuesta.content), "nodos": ["generar_sql"]}
 
 

@@ -14,3 +14,7 @@ __pycache__/
 .pytest_cache/
 .streamlit/secrets.toml
 .ipynb_checkpoints/
+
+# Progreso de una evaluación sin terminar (scripts/run_eval.py --reanudar)
+eval/resultados/en_curso.json
+eval/resultados/en_curso.tmp

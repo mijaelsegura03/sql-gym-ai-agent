@@ -16,7 +16,6 @@ from langsmith import traceable
 
 from app.agent.estado import EstadoAgente
 from app.agent.nodos import cargar_prompt, modelos
-from app.llm import con_reintentos
 from app.ops import auditoria
 from app.ops.ejecucion import ejecutar
 from app.ops.mensajes import texto_cancelada, texto_propuesta, texto_rechazo, texto_resultado
@@ -35,8 +34,7 @@ def armar_prompt(estado: EstadoAgente) -> str:
 
 def extraer_operacion(estado: EstadoAgente) -> dict:
     """Convierte el mensaje en una ``OperacionSocio`` con salida estructurada (§7.1)."""
-    llm = modelos.llm_principal().with_structured_output(ExtraccionOperacion)
-    extraccion: ExtraccionOperacion = con_reintentos(llm.invoke, armar_prompt(estado))
+    extraccion: ExtraccionOperacion = modelos.invocar("principal", armar_prompt(estado), ExtraccionOperacion)
     return {"operacion": extraccion.operacion, "nodos": ["extraer_operacion"]}
 
 

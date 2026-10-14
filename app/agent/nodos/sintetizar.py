@@ -19,7 +19,6 @@ import re
 
 from app.agent.estado import EstadoAgente
 from app.agent.nodos import cargar_prompt, modelos
-from app.llm import con_reintentos
 from app.rag.buscador import Fragmento
 
 _ERROR_DATOS = {
@@ -112,7 +111,7 @@ def sintetizar(estado: EstadoAgente) -> dict:
         return {"respuesta": _ERROR_DATOS[idioma], "fuentes": [], "citas": [], "ruta_final": c.ruta,
                 "nodos": ["sintetizar"]}
 
-    respuesta = con_reintentos(modelos.llm_principal().invoke, armar_prompt(estado))
+    respuesta = modelos.invocar("principal", armar_prompt(estado))
     crudo = _texto(respuesta.content).strip()
     citas = fuentes_citadas(crudo, fragmentos)
     texto = quitar_citas(crudo)

@@ -50,3 +50,57 @@ def test_cuota_diaria_no_se_reintenta(monkeypatch):
 def test_error_no_reintentable_se_propaga():
     with pytest.raises(ValueError):
         llm.con_reintentos(lambda: (_ for _ in ()).throw(ValueError("schema inválido")), dormir=lambda s: None)
+
+
+class Error503(Exception):
+    code = 503
+
+
+def test_saturacion_pasa_al_respaldo_sin_esperar():
+    esperas, llamadas = [], []
+
+    def principal():
+        llamadas.append("principal")
+        raise Error503("503 UNAVAILABLE: This model is currently experiencing high demand")
+
+    def respaldo():
+        llamadas.append("respaldo")
+        return "ok"
+
+    assert llm.con_reintentos(principal, max_reintentos=5, dormir=esperas.append, respaldo=respaldo) == "ok"
+    assert llamadas == ["principal", "respaldo"] and esperas == []
+
+
+def test_con_respaldo_alterna_y_espera_al_volver_al_primero():
+    esperas, llamadas = [], []
+
+    def falla(nombre):
+        def fn():
+            llamadas.append(nombre)
+            raise Error503("503 UNAVAILABLE")
+        return fn
+
+    with pytest.raises(Error503):
+        llm.con_reintentos(falla("a"), max_reintentos=3, dormir=esperas.append, respaldo=falla("b"))
+    assert llamadas == ["a", "b", "a", "b"] and len(esperas) == 1
+
+
+def test_cuota_diaria_del_principal_sigue_con_el_respaldo(monkeypatch):
+    monkeypatch.setattr(llm, "cuota_diaria_agotada", False)
+
+    def principal():
+        raise Error429("RESOURCE_EXHAUSTED: GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+
+    assert llm.con_reintentos(principal, max_reintentos=5, dormir=lambda s: None, respaldo=lambda: "ok") == "ok"
+    assert not llm.cuota_diaria_agotada
+
+
+def test_cuota_diaria_de_ambos_modelos(monkeypatch):
+    monkeypatch.setattr(llm, "cuota_diaria_agotada", False)
+
+    def sin_cuota():
+        raise Error429("RESOURCE_EXHAUSTED: GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+
+    with pytest.raises(llm.CuotaDiariaAgotada):
+        llm.con_reintentos(sin_cuota, max_reintentos=5, dormir=lambda s: None, respaldo=sin_cuota)
+    assert llm.cuota_diaria_agotada

@@ -54,6 +54,7 @@ Las ejecuciones siguientes no reinstalan dependencias, no piden las keys y no re
 |---|---|
 | `--sin-ui` | Deja la base levantada y termina (para tests o consultas a mano). |
 | `--evaluar` | Corre la evaluación completa en lugar de abrir la interfaz. |
+| `--reanudar` | Con `--evaluar`, continúa la última evaluación cortada (ver §5). |
 | `--reindexar` | Vuelve a indexar los PDFs aunque no hayan cambiado. |
 | `--mantener-db` | No baja el contenedor al salir. |
 | `--reinstalar` | Recrea `.venv` y reinstala las dependencias. |
@@ -109,6 +110,7 @@ python start.py --sin-ui          # deja la base levantada
 
 ```bash
 python start.py --evaluar                  # todo en un comando
+python start.py --evaluar --reanudar       # sigue una evaluación cortada
 .venv/Scripts/python scripts/run_eval.py   # con la base ya levantada
 ```
 
@@ -120,6 +122,11 @@ directa sin herramientas, datos, fidelidad y corrección RAG, escritura, validac
 y por caso, y, si hay LangSmith, registra la corrida como *experiment* del dataset `gimnasio-eval`.
 
 Opciones: `--casos CA-10,CA-20` (solo algunos), `--sin-juez` (sin jueces LLM), `--sin-langsmith`, `--reset`.
+
+El progreso se guarda después de cada caso en `eval/resultados/en_curso.json`. Si la corrida se corta (Ctrl+C,
+cuota diaria agotada o Gemini saturado), `--reanudar` la continúa con los mismos casos: saltea los ya evaluados y
+repite los que terminaron con error del agente (`python start.py --evaluar --reanudar` o
+`scripts/run_eval.py --reanudar`). El experiment de LangSmith se registra recién cuando la corrida se completa.
 
 Los casos que usan fechas relativas ("hoy", "este mes") tienen `depende_fecha` y `valido_hasta`: los datos
 tienen fechas fijas (fecha base 16/10/2026) pero el agente usa la fecha real del sistema.
@@ -167,6 +174,7 @@ start.py               Arranque completo
 | `Docker no está instalado` | Instalalo desde <https://docs.docker.com/get-docker/>. |
 | El puerto 5433 está ocupado | `start.py` usa el siguiente libre y lo informa. Para fijar otro, cambiá `DB_PORT` en `.env`. |
 | Error 429 / `RESOURCE_EXHAUSTED` de Gemini | Es el límite del plan gratuito: el agente reintenta con espera creciente. Para la evaluación, bajá `EVAL_RPM` en `.env`. |
+| Error 503 / `UNAVAILABLE` ("high demand") de Gemini | Saturación temporal de Google en ese modelo: el agente pasa al otro modelo configurado (rápido ↔ principal) y reintenta con espera creciente. |
 | `Falta GOOGLE_API_KEY` | Pegala en `.env` o ejecutá `python start.py` en una terminal interactiva. |
 | `Could not install packages due to an OSError: [Errno 2] No such file or directory` (Windows) | La ruta del repositorio es demasiado larga: algunas dependencias superan el límite de 260 caracteres de Windows dentro de `.venv`. Cloná el repositorio en una carpeta más corta (por ejemplo `C:\Users\<usuario>\Documents\sql-gym-ai-agent`) y ejecutá `python start.py --reinstalar`. |
 | Los PDFs cambiaron | `python start.py --reindexar`. |

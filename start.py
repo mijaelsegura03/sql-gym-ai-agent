@@ -5,12 +5,13 @@ contenedor de PostgreSQL, base creada y cargada, PDFs indexados e interfaz abier
 
 Uso::
 
-    python start.py [--reindexar] [--sin-ui] [--evaluar] [--mantener-db] [--reinstalar]
+    python start.py [--reindexar] [--sin-ui] [--evaluar [--reanudar]] [--mantener-db] [--reinstalar]
 
 Flags:
     --reindexar    vuelve a indexar los PDFs aunque no hayan cambiado.
     --sin-ui       termina dejando la base levantada (para tests o consultas a mano).
     --evaluar      corre la evaluación completa en lugar de abrir la interfaz.
+    --reanudar     con --evaluar, continúa la última evaluación sin terminar.
     --mantener-db  no baja el contenedor al salir.
     --reinstalar   recrea el entorno virtual y reinstala las dependencias.
 
@@ -323,8 +324,9 @@ def paso_ejecucion(args: argparse.Namespace) -> int:
         print("--sin-ui: la base queda levantada en el puerto", os.environ.get("DB_PORT"))
         return 0
     if args.evaluar:
-        print("Corriendo la evaluación completa…", flush=True)
-        return subprocess.call([sys.executable, str(RAIZ / "scripts" / "run_eval.py"), "--sin-reset"], cwd=RAIZ)
+        print("Reanudando la evaluación…" if args.reanudar else "Corriendo la evaluación completa…", flush=True)
+        return subprocess.call([sys.executable, str(RAIZ / "scripts" / "run_eval.py"), "--sin-reset",
+                                *(["--reanudar"] if args.reanudar else [])], cwd=RAIZ)
     print("Abriendo la interfaz en http://localhost:8501", flush=True)
     for perfil, dato in dni_ejemplo().items():
         print(f"      DNI de ejemplo — {perfil}: {dato}")
@@ -345,6 +347,7 @@ def main() -> int:
     parser.add_argument("--reindexar", action="store_true", help="reindexar los PDFs aunque no hayan cambiado")
     parser.add_argument("--sin-ui", action="store_true", help="dejar la base levantada sin abrir la interfaz")
     parser.add_argument("--evaluar", action="store_true", help="correr la evaluación en lugar de la interfaz")
+    parser.add_argument("--reanudar", action="store_true", help="con --evaluar, continuar la última evaluación sin terminar")
     parser.add_argument("--mantener-db", action="store_true", help="no bajar el contenedor al salir")
     parser.add_argument("--reinstalar", action="store_true", help="recrear .venv y reinstalar dependencias")
     args = parser.parse_args()
