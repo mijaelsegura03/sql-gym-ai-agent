@@ -135,7 +135,7 @@ def pantalla_ingreso() -> None:
             st.session_state["usuario"] = usuario
             st.session_state["historial"] = []
             st.rerun()
-        st.caption("Identificación simulada por DNI, sin contraseña (supuesto S-01 del spec funcional).")
+        st.caption("Identificación simulada por DNI, sin contraseña")
 
 
 # ---------------------------------------------------------------------------
