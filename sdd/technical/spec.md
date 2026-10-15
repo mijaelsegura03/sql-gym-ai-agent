@@ -2,10 +2,10 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 0.7 |
-| Estado | Implementado (ajustes de implementación registrados en el historial) |
-| Fecha | 2026-10-04 |
-| Spec funcional de referencia | `sdd/functional/spec.md` v0.6 |
+| Versión | 0.8 |
+| Estado | Aprobado: agente de lectura pendiente de implementación (tasks T-35 a T-40); el resto, implementado |
+| Fecha | 2026-10-14 |
+| Spec funcional de referencia | `sdd/functional/spec.md` v0.7 |
 | Siguiente artefacto | `sdd/tasks.json` |
 
 > Este documento define **cómo** se implementa lo que pide el spec funcional. Cada decisión
@@ -19,8 +19,8 @@
 | ID | Tema | Decisión | Alternativas descartadas y motivo |
 |---|---|---|---|
 | T-01 | Lenguaje | **Python 3.12+** | — |
-| T-02 | LLM | **Google Gemini** vía `langchain-google-genai`. Dos modelos configurables por variable de entorno: uno **rápido** (clasificación) y uno **principal** (SQL, extracción, síntesis y juez de evaluación). | Elegido por el plan gratuito. Ver §1.1. |
-| T-03 | Framework agéntico | **LangGraph** (R-01) | Smolagents: no trae control de flujo explícito ni pausa para confirmar (`interrupt`), que se necesita para RF-46. |
+| T-02 | LLM | **Google Gemini** vía `langchain-google-genai`. Dos modelos configurables por variable de entorno: uno **rápido** (clasificación) y uno **principal** (agente de lectura con *tool calling*, extracción y síntesis). | Elegido por el plan gratuito. Ver §1.1. |
+| T-03 | Framework agéntico | **LangGraph** (R-01). Un mismo `StateGraph` combina un **agente ReAct** para la lectura (el LLM con `bind_tools` en un ciclo con el nodo que ejecuta las herramientas, §5.3) y un **flujo fijo** para la escritura (DT-06). | Smolagents: no trae control de flujo explícito ni pausa para confirmar (`interrupt`), que se necesita para RF-46. Un único agente ReAct para todo, con la escritura como una herramienta más: la validación y la confirmación dependerían de que el modelo decida invocarlas (RF-25). `create_react_agent` (prebuilt): ver DT-07. |
 | T-05 | Evaluación | **Runner propio** (`scripts/run_eval.py`) con reportes versionados en `eval/resultados/` (RF-72 a RF-76). El registro en LangSmith es opcional y queda fuera del SDD. | `langsmith.evaluate()` como ejecución: el orden de los casos y la restauración de la base dependerían de cómo recorre los ejemplos (§9.3). |
 | T-06 | Base relacional | **PostgreSQL 16** en Docker, sin volumen (DC-08) | — |
 | T-07 | Base vectorial | **Chroma** embebida (`chromadb.PersistentClient`) en `.chroma/` (no se versiona) | pgvector: se descartó a favor de un componente separado de la base relacional. |
@@ -38,7 +38,7 @@ Verificado en la documentación de Google el 03/10/2026 (ai.google.dev, páginas
 | Variable | Valor por defecto | Uso | Plan gratuito |
 |---|---|---|---|
 | `GEMINI_MODEL_FAST` | `gemini-3.1-flash-lite` | Nodo `clasificar` | Sí (15 RPM, 500 RPD) |
-| `GEMINI_MODEL_MAIN` | `gemini-3.5-flash-lite` | `generar_sql`, `extraer_operacion` y `sintetizar` | Sí (15 RPM, 500 RPD) |
+| `GEMINI_MODEL_MAIN` | `gemini-3.5-flash-lite` | `agente_lectura`, `extraer_operacion` y `sintetizar` | Sí (15 RPM, 500 RPD) |
 | `GEMINI_MODEL_JUEZ` | `gemini-3.1-flash-lite` | Juez de la evaluación | Sí (15 RPM, 500 RPD) |
 | `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | Indexación y búsqueda | Sí |
 
@@ -46,6 +46,7 @@ Verificado en la documentación de Google el 03/10/2026 (ai.google.dev, páginas
 - **Sin costo:** el proyecto de la key no tiene facturación (plan *Free*): al superar un límite, Gemini devuelve 429 y no cobra. Todo llamado tiene reintentos con *backoff* exponencial ante 429 por minuto y ante 500/503/504 (saturación de Google, frecuente en estos modelos); Los nodos del agente usan el otro modelo como respaldo (`GEMINI_MODEL_FAST` respalda a `GEMINI_MODEL_MAIN` y viceversa): ante un error transitorio el reintento siguiente va al otro modelo sin esperar, y la espera exponencial se hace al volver al primero. El 429 por **límite diario** (`…PerDay…`) no se reintenta sobre ese modelo: se sigue con el respaldo y, si también lo agotó, corta con `CuotaDiariaAgotada`, la evaluación se detiene y la interfaz muestra un mensaje claro. La evaluación limita los requests por minuto con `EVAL_RPM` (12).
 - **Razonamiento:** el modelo rápido usa `thinking_budget=0` (`GEMINI_THINKING_FAST`), porque clasificar no lo necesita. `gemini-3.5-flash-lite` rechaza `thinking_budget=0` (400 `INVALID_ARGUMENT`) y con un presupuesto bajo no cambia la latencia, así que el principal queda con su valor por defecto.
 - **Uso de los datos:** en el plan gratuito, Google puede usar el contenido para mejorar sus productos. Se acepta porque los datos son sintéticos (S-04).
+- **Tool calling:** `agente_lectura` usa `bind_tools` del modelo principal. Si al implementarlo `gemini-3.5-flash-lite` no llama las herramientas de forma confiable (argumentos vacíos, llamadas inventadas), se prueba `gemini-3.1-flash-lite` y la decisión se registra en DT-08. El respaldo entre modelos (`con_reintentos`) se mantiene: el modelo de respaldo recibe las mismas herramientas.
 - **Parámetros:** `temperature=0` en todos los nodos (los modelos 3.x *lite* usan valores de muestreo fijos e ignoran la temperatura). Timeout de 30 s por llamada, para que una llamada colgada se reintente pronto.
 
 ---
@@ -59,7 +60,8 @@ Verificado en la documentación de Google el 03/10/2026 (ai.google.dev, páginas
                                  │ invoke / resume        │ RespuestaAgente
                          ┌───────▼───────────────────────┴──────────────┐
                          │ Grafo LangGraph (app/agent)                  │
-                         │  clasificar → ruta → nodos → sintetizar      │
+                         │  clasificar ─┬─ agente de lectura (ReAct)    │
+                         │              └─ flujo de escritura (fijo)    │
                          └──┬──────────────┬───────────────┬────────────┘
                             │ lectura      │ búsqueda      │ escritura
                ┌────────────▼───┐  ┌───────▼───────┐  ┌────▼────────────────┐
@@ -76,11 +78,18 @@ Verificado en la documentación de Google el 03/10/2026 (ai.google.dev, páginas
                   └───────────────────────────────────────────────┘
 ```
 
-**Principio de diseño:** el LLM **interpreta** (qué ruta, qué SQL de lectura, qué datos
-tiene la operación) y **redacta**. Los **permisos** los aplica el código y la base de datos
-(RNF-01, RNF-02): el perfil sale de la sesión, la lectura del socio pasa por vistas filtradas,
-la SQL se valida antes de ejecutarse y las escrituras son funciones Python con parámetros
-validados, ejecutadas con un rol distinto.
+**Principio de diseño:** el LLM **interpreta** (qué tipo de mensaje es, qué datos tiene la operación),
+**decide los pasos de la lectura** (qué herramienta invocar, con qué SQL o qué búsqueda, y cuándo parar) y
+**redacta**. Los **permisos** los aplica el código y la base de datos (RNF-01, RNF-02): el perfil sale de la
+sesión, las herramientas de lectura reciben el usuario del estado y no del LLM, la lectura del socio pasa por
+vistas filtradas, la SQL se valida antes de ejecutarse y las escrituras son funciones Python con parámetros
+validados, ejecutadas con un rol distinto, a las que solo se llega por el flujo fijo de escritura.
+
+| Parte | Tipo | Quién decide los pasos |
+|---|---|---|
+| Respuesta directa y rechazos | Un paso (`clasificar`) | — |
+| **Consultas de lectura** | **Agente** (ReAct con herramientas, RF-24) | El LLM, dentro de un límite de pasos |
+| **Operaciones de escritura** | **Workflow** (RF-25) | El grafo: extraer → validar → confirmar → ejecutar |
 
 ---
 
@@ -109,6 +118,7 @@ validados, ejecutadas con un rol distinto.
 │   └── agent/
 │       ├── estado.py             # EstadoAgente (TypedDict) y RespuestaAgente
 │       ├── grafo.py              # Construcción del StateGraph
+│       ├── herramientas.py       # Herramientas de lectura para bind_tools (§5.7)
 │       ├── nodos/                # Nodos agrupados por ruta (§5.2)
 │       └── prompts/              # Prompts versionados en .md
 ├── data/
@@ -260,13 +270,17 @@ class EstadoAgente(TypedDict):
     mensaje: str
     fecha_hoy: date                       # fecha real (RF-06)
     clasificacion: Clasificacion | None   # salida de `clasificar`
-    sql: str | None
-    sql_error: str | None
-    intentos_sql: int
-    filas: list[dict] | None
+    # Agente de lectura (§5.7)
+    mensajes_lectura: Annotated[list[AnyMessage], add_messages]  # conversación interna del agente, solo de este mensaje
+    pasos_lectura: int                    # rondas de herramientas ejecutadas (límite: MAX_PASOS_LECTURA)
+    consultas: Annotated[list[ConsultaEjecutada], operator.add]  # cada invocación de consulta_sql
+    pasos: Annotated[list[PasoAgente], operator.add]             # cada invocación de herramienta, para el detalle
+    sql: str | None                       # de la última consulta exitosa (o de la última, si ninguna lo fue)
+    sql_error: str | None                 # solo si ninguna consulta terminó bien
+    filas: list[dict] | None              # ídem: última consulta exitosa
     columnas: list[str] | None
     total_filas: int | None
-    fragmentos: list[Fragmento]
+    fragmentos: list[Fragmento]           # todos los recuperados, sin repetir (por chunk_id)
     operacion: OperacionSocio | None      # salida de `extraer_operacion`
     validacion: ResultadoValidacion | None
     propuesta: PropuestaCambio | None
@@ -282,19 +296,36 @@ class EstadoAgente(TypedDict):
     ruta_final: str | None
 ```
 
+```python
+class ConsultaEjecutada(BaseModel):
+    sql: str
+    ok: bool
+    error: str | None
+    columnas: list[str] | None
+    filas: list[dict] | None              # hasta 50 (RF-04)
+    total_filas: int | None
+
+class PasoAgente(BaseModel):
+    herramienta: Literal["consulta_sql", "busqueda_documentos"]
+    argumentos: dict                      # {"sql": ...} o {"consulta": ...}
+    resumen: str                          # "12 filas", "error: ...", "4 fragmentos (DOC-01, DOC-04)"
+```
+
+`intentos_sql` se quita: los reintentos son pasos del agente. `mensajes_lectura` vive en el hilo del mensaje
+actual y nunca se reutiliza en otro mensaje (RF-21).
+
 El DNI del usuario **no** forma parte del estado; solo su `id` y su seudónimo.
 
 ### 5.2 Nodos
 
 | Nodo | Tipo | Qué hace | Requisitos |
 |---|---|---|---|
-| `clasificar` | LLM rápido, salida estructurada | Devuelve `Clasificacion` (§5.4). Si la ruta es `directa` o `fuera_dominio`, también devuelve la respuesta, así esos mensajes se resuelven con **una sola llamada al LLM y ninguna herramienta**. | RF-14 a RF-17, RF-20, RF-21 |
+| `clasificar` | LLM rápido, salida estructurada | Devuelve `Clasificacion` (§5.4): `directa`, `fuera_dominio`, `necesita_contexto`, `lectura` o `escritura`. Si es `directa` o `fuera_dominio`, también devuelve la respuesta, así esos mensajes se resuelven con **una sola llamada al LLM y ninguna herramienta**. No elige las fuentes de la lectura. | RF-14 a RF-17, RF-20, RF-21 |
 | `responder_directo` | Determinístico | Copia la respuesta de la clasificación al estado. No invoca herramientas. | RF-15, RF-16 |
 | `rechazar_permiso` | Determinístico | Respuesta fija (en el idioma del mensaje) para un socio que pide escribir o información interna. | RF-40, RF-53 |
-| `generar_sql` | LLM principal | Genera una sola sentencia `SELECT` a partir del catálogo del perfil, la fecha de hoy y, si hubo un intento anterior, el error obtenido. | RF-01, RF-06, RF-07, RF-08 |
-| `ejecutar_sql` | Herramienta `consulta_sql` | `validar_sql()` y `ejecutar_lectura()` con el rol del perfil (§6). Si falla, vuelve a `generar_sql` hasta 2 veces más. | RF-02, RF-04, RF-05, RNF-05 |
-| `buscar_documentos` | Herramienta `busqueda_documentos` | Busca en Chroma con la consulta en castellano que armó `clasificar` (§8.3). | RF-09, RF-12, RF-13 |
-| `sintetizar` | LLM principal | Redacta la respuesta con las filas o los fragmentos disponibles, en el idioma del mensaje. Saca las citas del texto y arma las citas y las fuentes en código (§8.4). | RF-10, RF-11, RF-18, RF-19, RF-22 |
+| `agente_lectura` | LLM principal con `bind_tools` (herramientas de lectura, §5.7) | Con el prompt `agente_lectura.md` (catálogo del perfil, fecha, regla de fuente de verdad y reglas de SQL) y `mensajes_lectura`, decide el siguiente paso: devuelve un `AIMessage` con una o más `tool_calls`, o sin `tool_calls` cuando ya tiene información suficiente. Escribe la SQL directamente como argumento de `consulta_sql`. | RF-01, RF-06 a RF-08, RF-12, RF-18, RF-24 |
+| `herramientas_lectura` | Determinístico: ejecuta las `tool_calls` | Ejecuta cada llamada con el `usuario` del estado (nunca un argumento del LLM), agrega un `ToolMessage` por llamada con el resultado resumido (§5.7) y acumula `consultas`, `fragmentos`, `pasos` y `herramientas`. Un error de validación o de ejecución de la SQL vuelve como `ToolMessage` de error (RNF-05). | RF-02, RF-04, RF-05, RF-09, RF-13, RNF-01, RNF-05 |
+| `sintetizar` | LLM principal | Redacta la respuesta con las consultas y los fragmentos que reunió el agente, en el idioma del mensaje. Saca las citas del texto y arma las citas y las fuentes en código (§8.4). Fija `ruta_final` según las herramientas usadas (§5.3). | RF-10, RF-11, RF-14, RF-18, RF-19, RF-22 |
 | `extraer_operacion` | LLM principal, salida estructurada | Convierte el mensaje en una `OperacionSocio` (§7.1). | §5.5 funcional |
 | `validar_operacion` | Determinístico (herramienta `operacion_socio`) | Resuelve el socio, verifica alcance y reglas (§7.2) y arma la `PropuestaCambio`. | RF-41 a RF-45 |
 | `confirmar` | `interrupt()` | Pausa el grafo y devuelve la propuesta a quien llamó al agente. Se reanuda con `Command(resume={"decision": ...})`. | RF-46, RF-47 |
@@ -306,9 +337,14 @@ El DNI del usuario **no** forma parte del estado; solo su `id` y su seudónimo.
 ```
 START → clasificar ─┬─ directa | fuera_dominio | necesita_contexto ─▶ responder_directo ─▶ END
                     ├─ (socio ∧ escritura) | (socio ∧ pide_info_interna) ─▶ rechazar_permiso ─▶ END
-                    ├─ datos ─────▶ generar_sql ⇄ ejecutar_sql ─────────────▶ sintetizar ─▶ END
-                    ├─ documentos ─▶ buscar_documentos ─────────────────────▶ sintetizar ─▶ END
-                    ├─ hibrida ───▶ [generar_sql ⇄ ejecutar_sql] ∥ [buscar_documentos] ─▶ sintetizar ─▶ END
+                    │
+                    │   AGENTE (ReAct)
+                    ├─ lectura ─▶ agente_lectura ──── tool_calls ∧ pasos < MAX ───▶ herramientas_lectura
+                    │                  ▲   │                                              │
+                    │                  │   └── sin tool_calls ∨ pasos = MAX ─▶ sintetizar ─▶ END
+                    │                  └──────────────────────────────────────────────────┘
+                    │
+                    │   WORKFLOW
                     └─ escritura (admin) ─▶ extraer_operacion ─▶ validar_operacion
                                               ├─ inválida ─▶ responder_operacion ─▶ END
                                               └─ válida ──▶ confirmar (interrupt)
@@ -319,42 +355,57 @@ START → clasificar ─┬─ directa | fuera_dominio | necesita_contexto ─�
 - **Las aristas condicionales que dependen del perfil se evalúan en código** con `usuario.perfil`
   (RNF-01). Aunque el LLM clasifique un mensaje de un socio como `escritura`, el socio no llega
   nunca a `extraer_operacion`.
-- La ruta `hibrida` usa *fan-out* de LangGraph: la rama SQL y la de documentos corren en paralelo y
-  `sintetizar` espera a las dos. Como la rama SQL puede reintentar (y tener más pasos que la de documentos),
-  `sintetizar` se registra como nodo diferido (`defer=True`): corre una sola vez, cuando no quedan otras tareas.
-- `responder_directo` también atiende la ruta `necesita_contexto`. `rechazar_permiso` conserva la ruta que eligió
-  el clasificador (por ejemplo `datos` o `escritura`), así la exactitud de ruteo se mide igual en esos casos.
+- **Ciclo del agente de lectura:** `agente_lectura` → `herramientas_lectura` → `agente_lectura` mientras el LLM
+  pida herramientas y `pasos_lectura < MAX_PASOS_LECTURA` (4, DT-08). Si el LLM pide varias herramientas en el mismo
+  mensaje (llamadas paralelas), se ejecutan todas y cuentan como un paso. Al llegar al límite, la arista va a
+  `sintetizar` aunque el LLM haya pedido más herramientas; esas llamadas no se ejecutan (RF-24). El
+  `recursion_limit` del grafo (30) queda por encima de este límite.
+- **Ruta informada en la lectura (RF-14):** `sintetizar` fija `ruta_final` con las herramientas usadas:
+  solo `consulta_sql` → `datos`; solo `busqueda_documentos` → `documentos`; las dos → `hibrida`. Si el agente no
+  invocó ninguna (el prompt le pide consultar al menos una fuente), la ruta es `lectura` y `sintetizar`
+  responde que no encontró información (RF-05, RF-11). Así los valores de `ruta_esperada` de la evaluación (`datos`, `documentos`, `hibrida`) no cambian.
+- Se quitan el *fan-out* de la ruta híbrida y el `defer=True` de `sintetizar`: el orden y la combinación de fuentes
+  los decide el agente.
+- `responder_directo` también atiende la ruta `necesita_contexto`. `rechazar_permiso` informa como ruta la de la
+  clasificación (`lectura` o `escritura`); para la exactitud de ruteo, `lectura` en un rechazo cuenta como acierto
+  si la ruta esperada es `datos`, `documentos` o `hibrida` (§9.4).
 - `rechazar_permiso` por información interna es una primera barrera. La barrera real es la base:
   aunque el clasificador no lo detecte, el rol `gym_lector_socio` no puede leer datos de otros
   socios, la consulta falla o vuelve vacía y `sintetizar` responde que no hay información
-  disponible para ese perfil.
+  disponible para ese perfil. El agente puede reformular la SQL varias veces, pero todas pasan por el
+  mismo validador y el mismo rol.
+- **El agente de lectura no tiene herramientas de escritura** (RF-25): `bind_tools` recibe solo `consulta_sql` y
+  `busqueda_documentos`, y `herramientas_lectura` rechaza cualquier otro nombre de herramienta con un
+  `ToolMessage` de error.
 
 **Llamadas al LLM por mensaje (RNF-06):**
 
 | Ruta | Llamadas | Herramientas |
 |---|---|---|
 | directa / fuera de dominio | 1 | ninguna |
-| documentos | 2 + 1 embedding | `busqueda_documentos` |
-| datos | 3 (hasta 5 con reintentos) | `consulta_sql` |
-| híbrida | 3 (hasta 5) + 1 embedding | `consulta_sql`, `busqueda_documentos` |
+| lectura con una herramienta (datos o documentos) | 4: `clasificar` + 2 de `agente_lectura` + `sintetizar` | `consulta_sql` o `busqueda_documentos` |
+| lectura híbrida encadenada | 5 (4 si pide las dos herramientas en paralelo) | las dos |
+| lectura, máximo | 7: `clasificar` + 5 de `agente_lectura` (una por cada uno de los 4 pasos y la última, cuyas `tool_calls` ya no se ejecutan) + `sintetizar` | hasta 4 rondas |
 | escritura | 2 | `operacion_socio` |
+
+Frente a la v0.7 (3 llamadas en datos, 2 en documentos), la lectura usa una o dos llamadas más por mensaje. Con
+500 RPD por modelo alcanza para una evaluación completa por día; `EVAL_RPM` se mantiene.
 
 ### 5.4 Salida de `clasificar`
 
 ```python
 class Clasificacion(BaseModel):
-    ruta: Literal["directa", "fuera_dominio", "necesita_contexto",
-                  "datos", "documentos", "hibrida", "escritura"]
+    ruta: Literal["directa", "fuera_dominio", "necesita_contexto", "lectura", "escritura"]
     idioma: Literal["es", "en"]
     pide_info_interna: bool          # p. ej. datos de otros socios o métricas del negocio
-    pregunta_datos: str | None       # parte del mensaje que se resuelve con la base
-    consulta_documentos: str | None  # consulta de búsqueda reformulada en castellano (RF-13)
     respuesta_directa: str | None    # solo para directa / fuera_dominio / necesita_contexto
 ```
 
 El prompt de `clasificar` incluye el perfil (para adaptar la respuesta a "¿qué podés hacer?"),
-la regla de fuente de verdad (RF-18), ejemplos de mensajes mixtos (RF-17) y de mensajes que
-dependen de un contexto previo (RF-21).
+ejemplos de mensajes mixtos (RF-17) y de mensajes que dependen de un contexto previo (RF-21). Se quitan
+`pregunta_datos` y `consulta_documentos`: la pregunta para la base y la búsqueda en los documentos las arma el
+agente de lectura como argumentos de las herramientas. La regla de fuente de verdad (RF-18) pasa al prompt del
+agente de lectura.
 
 ### 5.5 Independencia entre mensajes y confirmación
 
@@ -381,6 +432,8 @@ class RespuestaAgente(BaseModel):
     filas: list[dict] | None         # hasta 50 (RF-04)
     total_filas: int | None
     fragmentos: list[Fragmento]      # doc_id, titulo_doc, seccion, pagina, texto
+    consultas: list[ConsultaEjecutada]   # todas las consultas del agente; `sql` y `filas` son las de la última exitosa
+    pasos: list[PasoAgente]          # herramientas invocadas en orden, con sus argumentos (RF-24)
     propuesta: PropuestaCambio | None
     thread_id: str
     trace_id: str | None
@@ -397,7 +450,27 @@ Funciones de entrada (`app/agent/grafo.py`): `responder(usuario, mensaje)`, `rea
 decision)` (solo si el hilo tiene una propuesta pendiente del mismo usuario; si no, no ejecuta nada, lo que evita
 reejecutar al recargar la página) y `descartar(usuario, thread_id)`.
 
-Las filas se devuelven en `filas`, tomadas del resultado de la consulta y no del texto del LLM (RF-03).
+Las filas se devuelven en `filas`, tomadas del resultado de la consulta y no del texto del LLM (RF-03). Con perfil socio, `consultas` y `pasos` se devuelven sin la SQL (RF-56): se filtra en código, igual que `sql`.
+
+### 5.7 Herramientas de lectura (`app/agent/herramientas.py`)
+
+Se definen como herramientas de LangChain (nombre, descripción y esquema Pydantic de argumentos) para
+`bind_tools`. El LLM ve solo los argumentos; el usuario y la conexión los pone `herramientas_lectura`.
+
+| Herramienta | Argumentos (los elige el LLM) | Ejecuta | Resultado para el LLM (`ToolMessage`) |
+|---|---|---|---|
+| `consulta_sql` | `sql: str` (una sentencia `SELECT`) | `ejecutar_lectura(sql, usuario)` (§6.2, §6.3) | Columnas, total de filas y hasta 50 filas en JSON; o `ERROR: <motivo>` (validación o ejecución) |
+| `busqueda_documentos` | `consulta: str` (en castellano, §8.3) | `buscar(consulta)` (§8.2) | Cada fragmento con su etiqueta `[DOC-0X §N, p. P]` y su texto; o `SIN RESULTADOS` |
+
+- Las descripciones de las herramientas explican qué contiene cada fuente (las mismas de "Fuentes que existen" del
+  prompt actual de `clasificar`) y la regla de fuente de verdad (RF-18), para que el LLM elija bien.
+- El prompt `agente_lectura.md` reúne lo que hoy está en `generar_sql.md` (catálogo, reglas de SQL, fecha, reglas
+  del perfil) más las instrucciones de planificación: consultar al menos una fuente; preferir la base para hechos y
+  los documentos para reglas; si una consulta falla, leer el error y corregirla; buscar en los documentos en
+  castellano aunque el mensaje esté en inglés; terminar sin llamar herramientas cuando la información alcanza.
+  El agente **no redacta la respuesta final**: la redacta `sintetizar` (DT-09).
+- Los decoradores `@traceable(run_type="tool")` actuales se mantienen, así cada invocación aparece como
+  herramienta en las trazas (fuera del SDD).
 
 ---
 
@@ -412,11 +485,11 @@ semántica del §4.7, sinónimos del dominio (RF-08: "moroso", "MP", "la sede de
 la semántica es lo que más impacta en la calidad de la SQL. El esquema completo entra en el prompt:
 son 17 tablas.
 
-Reglas que se le piden a `generar_sql`:
+Reglas que se le piden a `agente_lectura` para la SQL de `consulta_sql`:
 
 - Una sola sentencia `SELECT` (se permite `WITH`).
 - Cuando la consulta filtra personas por nombre, devolver también el DNI y el nombre completo, para
-  que `sintetizar` detecte la ambigüedad (RF-07).
+  que el agente y `sintetizar` detecten la ambigüedad (RF-07).
 - Usar la fecha de hoy que viene en el prompt para resolver expresiones relativas (RF-06), con la
   semana de lunes a domingo.
 
@@ -431,7 +504,7 @@ Con sqlglot, antes de ejecutar:
 | Solo relaciones permitidas: tablas de `public` y `agente.auditoria` para el admin; vistas de `socio_api` para el socio | ✅ | ✅ |
 | Funciones solo de una **lista permitida**: agregados, fecha y hora, texto, matemáticas, `coalesce`, `nullif`, `greatest`, `least`, `cast`, `to_char`, `date_trunc`, `extract` y `age`. Quedan fuera `set_config`, `current_setting`, `pg_*`, `lo_*` y `dblink*`. | ✅ | ✅ |
 
-Si la validación falla, el error vuelve a `generar_sql` como si fuera un error de ejecución.
+Si la validación falla, el error vuelve al agente como resultado de `consulta_sql` (`ToolMessage` de error), igual que un error de ejecución.
 
 ### 6.3 Ejecución (`ejecutar_lectura`)
 
@@ -575,8 +648,10 @@ transacción propia).
 
 ### 8.3 Idioma
 
-`clasificar` siempre entrega `consulta_documentos` en castellano, porque los PDFs están en
-castellano, y `sintetizar` responde en el idioma del mensaje manteniendo las citas (RF-13).
+`agente_lectura` escribe el argumento `consulta` de `busqueda_documentos` en castellano, porque los PDFs están en
+castellano (lo indican el prompt y la descripción de la herramienta), y `sintetizar` responde en el idioma del
+mensaje manteniendo las citas (RF-13). El agente puede hacer varias búsquedas con consultas distintas; los
+fragmentos se acumulan sin repetir.
 
 ### 8.4 Citas
 
@@ -658,9 +733,9 @@ Fuera del SDD (criterio de observabilidad de la consigna). El agente funciona si
 
 | Métrica (§5.8.1 funcional) | Evaluador | Tipo |
 |---|---|---|
-| Exactitud de ruteo | `ruta == ruta_esperada` | Determinístico |
+| Exactitud de ruteo | `ruta == ruta_esperada`. En la lectura, `ruta` sale de las herramientas que usó el agente (§5.3); en un rechazo por permisos con ruta `lectura`, acierta si la esperada es `datos`, `documentos` o `hibrida` | Determinístico |
 | Respuesta directa sin herramientas | `herramientas == []` en los casos `directa` y `fuera_dominio` | Determinístico |
-| Exactitud de datos | Las filas esperadas están contenidas en `filas` (comparación por valores, sin importar el nombre de las columnas ni el orden; números con tolerancia de 0,01) | Determinístico |
+| Exactitud de datos | Las filas esperadas están contenidas en las filas de alguna de las `consultas` exitosas (comparación por valores, sin importar el nombre de las columnas ni el orden; números con tolerancia de 0,01) | Determinístico |
 | Fidelidad RAG | Juez LLM: "¿cada afirmación está respaldada por los fragmentos?" | LLM |
 | Corrección RAG | Juez LLM contra `esperado.debe_contener` (lista de hechos) | LLM |
 | Exactitud de escritura | `verificacion_db` después de confirmar | Determinístico |
@@ -723,7 +798,8 @@ Fuera del SDD: la consigna pide especificar solo el agente. La interfaz consume 
 | `test_ejecucion_ops.py` | Atomicidad (falla a mitad → sin cambios), revalidación y auditoría | Docker |
 | `test_auth.py` | Socio válido, admin válido (los 3 roles), instructor, empleado inactivo, DNI cruzado entre perfiles | Docker |
 | `test_ingesta.py` | Chunking por sección, metadatos, tablas convertidas a Markdown | — |
-| `test_grafo_rutas.py` | Con el LLM simulado: cada ruta recorre los nodos esperados; con perfil socio nunca se llega a `extraer_operacion` | — |
+| `test_grafo_rutas.py` | Con el LLM simulado: cada ruta recorre los nodos esperados; con perfil socio nunca se llega a `extraer_operacion`. Agente de lectura con `tool_calls` simuladas: una herramienta, las dos encadenadas, las dos en paralelo, error de SQL corregido en el paso siguiente, corte en `MAX_PASOS_LECTURA`, herramienta desconocida rechazada, `ruta_final` derivada de las herramientas y SQL filtrada en `consultas` y `pasos` con perfil socio | — |
+| `test_herramientas.py` | Esquemas de argumentos de las herramientas de lectura (el usuario no es un argumento) y formato de los `ToolMessage` (filas, error, fragmentos con etiqueta, sin resultados) | — |
 | `test_datos.py` | Los casos necesarios de los datos (§9.4) | Docker |
 | `test_catalogos.py` | Los catálogos cubren todas las tablas o vistas y sus ejemplos se ejecutan con el rol del perfil | Docker |
 | `test_evaluacion.py` | Comparación de valores, evaluadores y runner de escritura con LLM simulado | Docker (parcial) |
@@ -738,9 +814,11 @@ Los tests que requieren Docker se marcan con `@pytest.mark.db`.
 
 | Funcional | Técnico |
 |---|---|
-| RF-01 a RF-08 | §5.2 `generar_sql` / `ejecutar_sql`, §6 |
+| RF-01 a RF-08 | §5.2 `agente_lectura` / `herramientas_lectura`, §5.7, §6 |
 | RF-09 a RF-13 | §8 |
 | RF-14 a RF-19 | §5.2 a §5.4 |
+| RF-24 | §2, §5.2, §5.3, §5.7, DT-06 a DT-09 |
+| RF-25 | §2, §5.3, §7, DT-06 |
 | RF-20 a RF-23 | §5.4, §5.5, prompts de `sintetizar` |
 | RF-40 a RF-49, OP-01 a OP-05 | §5.3, §7, §4.5 |
 | RF-50 a RF-56 | `app/auth.py`, §4.3, §4.4, §5.6 |
@@ -760,6 +838,10 @@ Los tests que requieren Docker se marcan con `@pytest.mark.db`.
 | DT-02 | ¿Qué DNI se usa en cada caso de evaluación y en las preguntas de ejemplo? | Se eligen de los datos cargados, un socio representativo de cada situación, y quedan documentados en el encabezado de `eval/casos.yaml` y en el README. | Cerrada |
 | DT-03 | En la **suspensión**, ¿qué membresías se cancelan? | La `activa`, la `congelada` y la `pendiente` con `fecha_fin >= hoy`. Un socio suspendido no puede usar ninguna. Se refleja en OP-03 del spec funcional (v0.4). | Cerrada |
 | DT-04 | Valor de `RAG_DISTANCIA_MAX` | `0.45`. Con `gemini-embedding-001` las distancias coseno están muy juntas: el mejor fragmento relevante queda entre 0,18 y 0,25, pero otros fragmentos necesarios aparecen hasta 0,36 (la tabla de sanciones de DOC-01 §7 para "¿qué pasa si un socio presta su QR?"), y los de un tema no cubierto (mascotas, CA-24) arrancan en 0,27. El umbral no separa por sí solo: se deja permisivo (0,35 cortaba fragmentos necesarios) y `sintetizar` decide si los fragmentos cubren la pregunta (RF-11). | Cerrada |
+| DT-06 | ¿Qué partes son agente y qué partes son workflow? (DC-11 funcional) | **Lectura: agente ReAct** (`agente_lectura` ⇄ `herramientas_lectura`): el LLM elige herramienta, argumentos y cuándo parar. **Escritura: workflow** (`extraer_operacion` → `validar_operacion` → `confirmar` → `ejecutar_operacion`). En la lectura, un error del modelo cuesta a lo sumo una consulta de más, y los permisos están en las herramientas y en la base. En la escritura, la validación y la confirmación tienen que ocurrir siempre, así que no pueden depender de que el modelo las invoque. `clasificar` se mantiene como primer paso: resuelve las respuestas directas con una sola llamada y sin herramientas (métrica al 100 %) y aplica los rechazos por perfil en código antes de entrar al agente. Reemplaza al ruteo fijo datos / documentos / híbrida y al *fan-out* de la v0.7. | Cerrada |
+| DT-07 | ¿`create_react_agent` (prebuilt) o nodos propios? | **Nodos propios** en el mismo `StateGraph`: las herramientas necesitan el `usuario` del estado (no un argumento del LLM), tienen que acumular `consultas`, `fragmentos` y `pasos` en el estado para `sintetizar` y la respuesta, y el límite de pasos y la salida hacia `sintetizar` se controlan en la arista condicional. Con el prebuilt habría que resolver lo mismo con `InjectedState` y un subgrafo aparte, sin ventajas. | Cerrada |
+| DT-08 | Límite de pasos del agente de lectura | `MAX_PASOS_LECTURA = 4` rondas de herramientas. Alcanza para una consulta, una corrección de SQL y una búsqueda en los documentos con margen, y deja el peor caso en 7 llamadas al LLM por mensaje (RNF-06). Se revisa con la corrida de evaluación de T-39; el modelo usado para el *tool calling* también se registra acá. | Cerrada (revisable en T-39) |
+| DT-09 | ¿El agente de lectura redacta la respuesta final? | No: cuando deja de pedir herramientas, la respuesta la redacta `sintetizar` con lo que reunió el agente. Así se conservan sin cambios las citas y las fuentes armadas en código (§8.4, RF-10, RF-19), las reglas de redacción (RF-07, RF-11, RF-22) y el mensaje fijo ante errores (RF-23). Cuesta una llamada más por mensaje. | Cerrada |
 | DT-05 | ¿Se cumple RNF-04 (p90 < 15 s) con los modelos del plan gratuito? | No. Corrida completa del 03/10/2026 (`eval/resultados/2026-10-03_2046_f00bf93.md`, 58 casos): mediana 11,5 s y p90 40,4 s. La cola la arman las demoras de Gemini, no el grafo: los 6 casos de más de 40 s tuvieron una llamada colgada hasta el timeout de 30 s y un reintento, y hubo 8 timeouts y 7 respuestas 503 en total. Sin los casos con incidentes de Gemini (45 de 58), la mediana es 10,6 s y el p90 24,9 s, todavía por encima del objetivo: los modelos *lite* del plan gratuito tardan de 4 a 8 s por llamada y una consulta de datos o híbrida encadena 3 o 4. Se mantiene el timeout de 30 s: bajarlo recorta la cola, pero hace reintentar respuestas largas que sí iban a llegar. Se acepta como limitación conocida (DC-10 del spec funcional); con un modelo pago o un plan con más cuota, el objetivo es alcanzable sin cambios de diseño. | Cerrada |
 
 ---
@@ -774,4 +856,5 @@ Los tests que requieren Docker se marcan con `@pytest.mark.db`.
 | 0.4 | 2026-10-03 | Ajustes de implementación: extensión `unaccent` en el esquema `ext`, zona horaria fija en las conexiones y auditoría sin `RETURNING` (§4.3); función `socio_api.socio_sesion()` y columna `con_reemplazo` (§4.4); regla de datos para CA-58 (§4.6); claves extra del estado y de `RespuestaAgente` y funciones de entrada (§5.1, §5.6); `sintetizar` diferido y ruta conservada en el rechazo por permisos (§5.3); `CambiosSocio` en lugar de `dict` y avisos con plantillas es/en (§7.1); precisiones de sede y membresía pendiente (§7.2); runner de evaluación local con registro posterior en LangSmith y `EVAL_RPM` como límite de requests a Gemini (§9.3); tests adicionales (§12). |
 | 0.5 | 2026-10-03 | §1.1: modelos del plan gratuito según los límites relevados en AI Studio (los *flash* tienen 20 RPD; se pasa a `gemini-3.5-flash-lite` como principal y `gemini-3.1-flash-lite` como rápido y juez, 500 RPD cada uno), modelo juez separado, corte ante la cuota diaria, `thinking_budget=0` solo en el rápido y timeout de 30 s. Se cierran DT-02 y DT-04 (`RAG_DISTANCIA_MAX=0.45`). |
 | 0.6 | 2026-10-04 | Cierre: DT-05 (RNF-04 medido en la corrida completa y aceptado como limitación del plan gratuito). §11: la interfaz queda fuera del SDD (la consigna lo pide solo para el agente); se quitan T-04, la tabla de Streamlit, `app/ui/` del §3, `test_ui.py` del §12 y la fila de RF-60 a RF-67 de la trazabilidad, y §2, §5.5 y §5.6 se redactan sin depender de la interfaz. Por el mismo motivo salen el arranque y la infraestructura (T-14, §4.1 y §10 quedan como notas; §10 conserva solo la configuración) y las trazas (§9.1 queda como nota; T-05 pasa a ser el runner propio de evaluación, con LangSmith opcional). Se quitan las referencias a RF-77 (eliminado del spec funcional v0.5). |
+| 0.8 | 2026-10-14 | Lectura agéntica (spec funcional v0.7, RF-24 y RF-25). T-03 y §2: un `StateGraph` con un agente ReAct para la lectura y un workflow para la escritura (DT-06, DT-07). §5.1: estado del agente (`mensajes_lectura`, `pasos_lectura`, `consultas`, `pasos`; se quita `intentos_sql`). §5.2 y §5.3: `generar_sql`, `ejecutar_sql` y `buscar_documentos` se reemplazan por `agente_lectura` y `herramientas_lectura`, con límite de pasos (DT-08); se quitan el *fan-out* y el `defer` de `sintetizar`, que se mantiene como paso final (DT-09) y deriva la ruta de las herramientas usadas; nuevas llamadas por mensaje. §5.4: `Clasificacion` con la ruta `lectura` y sin `pregunta_datos` ni `consulta_documentos`. §5.6: `consultas` y `pasos` en la respuesta. Nueva §5.7 (herramientas de lectura). §1.1, §6.1, §6.2, §8.3, §9.4, §12 y §13 se ajustan. |
 | 0.7 | 2026-10-04 | §8.4: las citas se sacan del texto de la respuesta y viajan en `citas` (estado y `RespuestaAgente`); `fuentes` usa el título de cada documento citado (`titulo_doc` en `Fragmento`). Sigue a la v0.6 del spec funcional. |

@@ -1,10 +1,10 @@
 {
   "proyecto": "sql-gym-ai-agent — Punto 3 de la consigna",
-  "version": "0.6",
-  "fecha": "2026-10-04",
+  "version": "0.7",
+  "fecha": "2026-10-14",
   "specs": {
-    "funcional": "sdd/functional/spec.md v0.6",
-    "tecnico": "sdd/technical/spec.md v0.7"
+    "funcional": "sdd/functional/spec.md v0.7",
+    "tecnico": "sdd/technical/spec.md v0.8"
   },
   "convenciones": {
     "estado": "pendiente | en_curso | hecha | bloqueada",
@@ -75,6 +75,19 @@
       "tasks": [
         "T-34",
         "T-33"
+      ]
+    },
+    {
+      "id": "M7",
+      "nombre": "Lectura agéntica (agente ReAct para lectura, workflow para escritura)",
+      "fecha_objetivo": "2026-10-15",
+      "tasks": [
+        "T-35",
+        "T-36",
+        "T-37",
+        "T-38",
+        "T-39",
+        "T-40"
       ]
     }
   ],
@@ -1172,6 +1185,275 @@
       "estado": "hecha",
       "responsable": null,
       "notas": "Specs cerrados (funcional v0.6, técnico v0.7), sin decisiones abiertas. Trazabilidad verificada el 03/10/2026 y actualizada el 04/10/2026: los 56 RF, RNF y OP del spec funcional están cubiertos por al menos una task; los 56 CA se verifican: 50 con casos de eval/casos.yaml, CA-80, CA-81 y CA-86 con test_auth.py y CA-82 a CA-84 con test_grafo_rutas.py. El 04/10/2026 se quitó del SDD lo que la consigna no pide desarrollar con SDD (solo el agente): el informe técnico (T-32, RF-77), la interfaz (M4: T-25 a T-27; RF-57, RF-60 a RF-67), el arranque, la infraestructura y el README (T-02, T-07, T-31; RNF-07, RNF-08) y las trazas (T-24; RF-70, RF-71, CA-85). Todo eso sigue en el repositorio, fuera del SDD. No quedan tasks pendientes."
+    },
+    {
+      "id": "T-35",
+      "titulo": "Herramientas de lectura para tool calling",
+      "fase": "M7",
+      "descripcion": "Definir consulta_sql y busqueda_documentos como herramientas de LangChain (nombre, descripción y esquema de argumentos) para bind_tools, con las funciones que las ejecutan con el usuario del estado y el formato de su resultado como ToolMessage. Agregar ConsultaEjecutada y PasoAgente.",
+      "spec_tecnico": [
+        "§5.1",
+        "§5.7",
+        "§6.2",
+        "§6.3",
+        "§8.2",
+        "§8.3"
+      ],
+      "requisitos": [
+        "RF-02",
+        "RF-04",
+        "RF-09",
+        "RF-13",
+        "RF-24",
+        "RNF-01",
+        "RNF-05"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "app/agent/herramientas.py",
+        "app/agent/estado.py",
+        "tests/test_herramientas.py"
+      ],
+      "depende_de": [
+        "T-33"
+      ],
+      "definicion_de_hecho": [
+        "Los esquemas de argumentos tienen solo `sql` y `consulta`: el usuario, el perfil y la conexión no son argumentos del LLM",
+        "Las descripciones explican qué contiene cada fuente y la regla de fuente de verdad (RF-18); la de busqueda_documentos pide la consulta en castellano",
+        "El resultado de consulta_sql trae columnas, total y hasta 50 filas, o `ERROR: <motivo>` ante un error de validación o de ejecución",
+        "El resultado de busqueda_documentos trae cada fragmento con su etiqueta [DOC-0X §N, p. P], o `SIN RESULTADOS`",
+        "Se mantienen los @traceable(run_type=\"tool\") de las dos herramientas",
+        "tests/test_herramientas.py pasa"
+      ],
+      "estimacion": "S",
+      "estado": "pendiente",
+      "responsable": null,
+      "notas": null
+    },
+    {
+      "id": "T-36",
+      "titulo": "Nodos agente_lectura y herramientas_lectura",
+      "fase": "M7",
+      "descripcion": "Implementar el agente ReAct de lectura: el nodo agente_lectura (modelo principal con bind_tools y el prompt agente_lectura.md, que reúne el catálogo y las reglas de SQL de generar_sql.md con las instrucciones de planificación) y el nodo herramientas_lectura, que ejecuta las tool_calls, acumula consultas, fragmentos, pasos y herramientas, y rechaza herramientas desconocidas. Límite MAX_PASOS_LECTURA = 4.",
+      "spec_tecnico": [
+        "§1.1",
+        "§5.1",
+        "§5.2",
+        "§5.3",
+        "§5.7",
+        "§6.1",
+        "DT-07",
+        "DT-08",
+        "DT-09"
+      ],
+      "requisitos": [
+        "RF-01",
+        "RF-06",
+        "RF-07",
+        "RF-08",
+        "RF-12",
+        "RF-18",
+        "RF-24",
+        "RF-25",
+        "RNF-05",
+        "RNF-06"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "app/agent/nodos/lectura.py",
+        "app/agent/prompts/agente_lectura.md",
+        "app/agent/nodos/__init__.py",
+        "app/llm.py"
+      ],
+      "depende_de": [
+        "T-35"
+      ],
+      "definicion_de_hecho": [
+        "agente_lectura devuelve un AIMessage con tool_calls o sin ellas; el respaldo entre modelos de con_reintentos recibe las mismas herramientas",
+        "herramientas_lectura ejecuta todas las tool_calls de un AIMessage (llamadas paralelas) como un solo paso y agrega un ToolMessage por llamada",
+        "Un nombre de herramienta fuera de consulta_sql y busqueda_documentos devuelve un ToolMessage de error y no ejecuta nada",
+        "sql, filas, columnas y total_filas del estado quedan con la última consulta exitosa; fragmentos se acumulan sin repetir por chunk_id",
+        "Se quitan generar_sql, ejecutar_sql, buscar_documentos, intentos_sql y el prompt generar_sql.md (su contenido pasa a agente_lectura.md)",
+        "Prueba manual con Gemini real: una pregunta de datos, una de documentos y CA-30 (híbrida encadenada) se resuelven con tool calling; si el modelo principal no llama bien las herramientas, se prueba el rápido y se registra en DT-08"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null,
+      "notas": null
+    },
+    {
+      "id": "T-37",
+      "titulo": "Grafo con agente de lectura, clasificación y respuesta",
+      "fase": "M7",
+      "descripcion": "Conectar el ciclo agente_lectura ⇄ herramientas_lectura en el grafo con la arista condicional del límite de pasos. Clasificacion pasa a tener la ruta `lectura` y pierde pregunta_datos y consulta_documentos (la regla de fuente de verdad pasa al prompt del agente). sintetizar trabaja con las consultas y fragmentos reunidos, deja de ser diferido y fija ruta_final según las herramientas usadas. RespuestaAgente suma consultas y pasos, sin SQL para el socio.",
+      "spec_tecnico": [
+        "§5.2",
+        "§5.3",
+        "§5.4",
+        "§5.6",
+        "§8.4",
+        "DT-06"
+      ],
+      "requisitos": [
+        "RF-03",
+        "RF-05",
+        "RF-10",
+        "RF-11",
+        "RF-14",
+        "RF-15",
+        "RF-16",
+        "RF-17",
+        "RF-19",
+        "RF-23",
+        "RF-24",
+        "RF-25",
+        "RF-56",
+        "RNF-01"
+      ],
+      "criterios_aceptacion": [
+        "CA-01",
+        "CA-06",
+        "CA-30",
+        "CA-82",
+        "CA-83",
+        "CA-84"
+      ],
+      "archivos": [
+        "app/agent/grafo.py",
+        "app/agent/estado.py",
+        "app/agent/nodos/clasificar.py",
+        "app/agent/prompts/clasificar.md",
+        "app/agent/nodos/sintetizar.py",
+        "app/agent/prompts/sintetizar.md"
+      ],
+      "depende_de": [
+        "T-36"
+      ],
+      "definicion_de_hecho": [
+        "El grafo coincide con el diagrama del §5.3: sin fan-out híbrido y sin defer en sintetizar; la escritura no cambia",
+        "ruta_final: solo consulta_sql → datos, solo busqueda_documentos → documentos, las dos → hibrida, ninguna → lectura",
+        "Las respuestas directas siguen sin herramientas y con una sola llamada al LLM",
+        "Con perfil socio, rechazar_permiso sigue antes del agente, y consultas y pasos de la respuesta no incluyen la SQL (RF-56)",
+        "Las citas y las fuentes se siguen armando en código (§8.4) con los fragmentos de todas las búsquedas",
+        "La interfaz (fuera del SDD) sigue funcionando con la nueva RespuestaAgente; en el detalle se agregan los pasos del agente"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null,
+      "notas": null
+    },
+    {
+      "id": "T-38",
+      "titulo": "Tests del agente de lectura con LLM simulado",
+      "fase": "M7",
+      "descripcion": "Actualizar test_grafo_rutas.py para que el LLM simulado devuelva tool_calls y cubrir los casos del agente de lectura del §12.",
+      "spec_tecnico": [
+        "§12"
+      ],
+      "requisitos": [
+        "RF-14",
+        "RF-24",
+        "RF-25",
+        "RF-56",
+        "RNF-01",
+        "RNF-05",
+        "RNF-06"
+      ],
+      "criterios_aceptacion": [
+        "CA-82",
+        "CA-83",
+        "CA-84"
+      ],
+      "archivos": [
+        "tests/test_grafo_rutas.py",
+        "tests/conftest.py"
+      ],
+      "depende_de": [
+        "T-37"
+      ],
+      "definicion_de_hecho": [
+        "Hay tests para: una herramienta, las dos encadenadas, las dos en paralelo, error de SQL corregido en el paso siguiente, corte en MAX_PASOS_LECTURA, herramienta desconocida rechazada, ruta_final derivada y SQL filtrada con perfil socio",
+        "Con perfil socio nunca se llega a extraer_operacion ni a ninguna herramienta de escritura",
+        "`pytest` pasa completo (sin los marcados llm)"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null,
+      "notas": null
+    },
+    {
+      "id": "T-39",
+      "titulo": "Evaluación de la lectura agéntica",
+      "fase": "M7",
+      "descripcion": "Adaptar los evaluadores a la ruta derivada y a las consultas múltiples, correr la evaluación completa con Gemini real y comparar con la corrida del 14/10/2026 (eval/resultados/2026-10-14_1416_841a79f.md). Ajustar prompts o el límite de pasos si alguna métrica queda fuera de objetivo.",
+      "spec_tecnico": [
+        "§9.3",
+        "§9.4",
+        "DT-08"
+      ],
+      "requisitos": [
+        "RF-72",
+        "RF-73",
+        "RF-75",
+        "RNF-06"
+      ],
+      "criterios_aceptacion": [
+        "CA-10",
+        "CA-20",
+        "CA-30",
+        "CA-31",
+        "CA-32",
+        "CA-33"
+      ],
+      "archivos": [
+        "eval/evaluadores.py",
+        "scripts/run_eval.py",
+        "eval/resultados/"
+      ],
+      "depende_de": [
+        "T-38"
+      ],
+      "definicion_de_hecho": [
+        "Exactitud de ruteo: en un rechazo por permisos con ruta lectura, acierta si la esperada es datos, documentos o hibrida",
+        "Exactitud de datos: las filas esperadas se buscan en todas las consultas exitosas",
+        "Corrida completa versionada en eval/resultados/ con todas las métricas del §5.8.1 funcional en objetivo",
+        "DT-08 registra el límite de pasos y el modelo de tool calling que quedan, con la cantidad media de pasos y de llamadas por mensaje de la corrida"
+      ],
+      "estimacion": "M",
+      "estado": "pendiente",
+      "responsable": null,
+      "notas": "La corrida usa más llamadas que la anterior (§5.3 técnico): si se agota la cuota diaria, se continúa con `--reanudar`."
+    },
+    {
+      "id": "T-40",
+      "titulo": "Cierre de artefactos SDD de la lectura agéntica",
+      "fase": "M7",
+      "descripcion": "Pasar los specs a estado final con lo aprendido en la implementación, dejar todas las tasks en 'hecha' y verificar la trazabilidad de RF-24 y RF-25.",
+      "spec_tecnico": [
+        "§13",
+        "§15"
+      ],
+      "requisitos": [
+        "R-04"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "sdd/functional/spec.md",
+        "sdd/technical/spec.md",
+        "sdd/tasks.json"
+      ],
+      "depende_de": [
+        "T-39"
+      ],
+      "definicion_de_hecho": [
+        "Los specs no tienen decisiones abiertas y su estado es final, con el historial actualizado",
+        "RF-24 y RF-25 están cubiertos por tasks y por tests o casos de evaluación",
+        "Los artefactos están commiteados en el repositorio de la entrega"
+      ],
+      "estimacion": "S",
+      "estado": "pendiente",
+      "responsable": null,
+      "notas": "Fuera del SDD, en el mismo cierre: README (arquitectura del agente) e informe técnico."
     }
   ]
 }
