@@ -6,13 +6,15 @@ import operator
 from datetime import date
 from typing import Annotated, Any, Literal, TypedDict
 
+from langchain_core.messages import AnyMessage
+from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
 from app.auth import Usuario
 from app.ops.modelos import PropuestaCambio, ResultadoEjecucion, ResultadoValidacion
 from app.rag.buscador import Fragmento
 
-Ruta = Literal["directa", "fuera_dominio", "necesita_contexto", "datos", "documentos", "hibrida", "escritura"]
+Ruta = Literal["directa", "fuera_dominio", "necesita_contexto", "lectura", "escritura"]
 
 
 class Clasificacion(BaseModel):
@@ -22,11 +24,27 @@ class Clasificacion(BaseModel):
     idioma: Literal["es", "en"] = Field(description="Idioma del mensaje: es (castellano) o en (inglés)")
     pide_info_interna: bool = Field(
         description="True si pide datos de otros socios, de empleados (salvo nombre del instructor) o métricas del negocio")
-    pregunta_datos: str | None = Field(None, description="Parte del mensaje que se responde con la base de datos")
-    consulta_documentos: str | None = Field(
-        None, description="Consulta de búsqueda en los documentos, reformulada SIEMPRE en castellano")
     respuesta_directa: str | None = Field(
         None, description="Solo para directa, fuera_dominio y necesita_contexto: la respuesta al usuario, en su idioma")
+
+
+class ConsultaEjecutada(BaseModel):
+    """Una invocación de ``consulta_sql`` del agente de lectura (§5.1)."""
+
+    sql: str | None                       # None en la respuesta al socio (RF-56)
+    ok: bool
+    error: str | None = None
+    columnas: list[str] | None = None
+    filas: list[dict[str, Any]] | None = None   # hasta 50 (RF-04)
+    total_filas: int | None = None
+
+
+class PasoAgente(BaseModel):
+    """Una invocación de herramienta del agente, para el detalle de la respuesta (§5.1)."""
+
+    herramienta: Literal["consulta_sql", "busqueda_documentos", "describir_tabla", "valores_columna", "operacion_socio"]
+    argumentos: dict[str, Any] = {}       # los del LLM; sin la SQL para el socio (RF-56)
+    resumen: str                          # "12 filas", "error: ...", "4 fragmentos (DOC-01, DOC-04)", "propuesta lista…"
 
 
 class EstadoAgente(TypedDict, total=False):
@@ -37,15 +55,17 @@ class EstadoAgente(TypedDict, total=False):
     fecha_hoy: date
     trace_id: str | None
     clasificacion: Clasificacion | None
-    # Rama de datos
-    sql: str | None
-    sql_error: str | None
-    intentos_sql: int
-    filas: list[dict[str, Any]] | None
+    # Agente (§5.7)
+    mensajes_agente: Annotated[list[AnyMessage], add_messages]   # conversación interna, solo de este mensaje
+    pasos_agente: int                                            # rondas de herramientas (MAX_PASOS_AGENTE)
+    consultas: Annotated[list[ConsultaEjecutada], operator.add]  # cada invocación de consulta_sql
+    pasos: Annotated[list[PasoAgente], operator.add]             # cada invocación de herramienta
+    sql: str | None                       # de la última consulta exitosa (o de la última, si ninguna lo fue)
+    sql_error: str | None                 # solo si ninguna consulta terminó bien
+    filas: list[dict[str, Any]] | None    # ídem: última consulta exitosa
     columnas: list[str] | None
     total_filas: int | None
-    # Rama de documentos
-    fragmentos: list[Fragmento]
+    fragmentos: list[Fragmento]           # todos los recuperados, sin repetir
     # Rama de escritura
     operacion: Any | None                 # OperacionSocio
     validacion: ResultadoValidacion | None
@@ -75,6 +95,8 @@ class RespuestaAgente(BaseModel):
     filas: list[dict[str, Any]] | None = None   # hasta 50 (RF-04)
     total_filas: int | None = None
     fragmentos: list[Fragmento] = []
+    consultas: list[ConsultaEjecutada] = []     # todas las del agente; sql y filas son las de la última exitosa
+    pasos: list[PasoAgente] = []                # herramientas invocadas en orden, con sus argumentos (RF-24)
     propuesta: PropuestaCambio | None = None
     propuesta_pendiente: bool = False  # True si el grafo quedó esperando Confirmar/Cancelar
     resultado_operacion: ResultadoEjecucion | None = None

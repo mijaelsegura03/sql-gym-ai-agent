@@ -57,13 +57,7 @@ def ruta_despues_de_clasificar(estado: EstadoAgente) -> str | list[str]:
         return "responder_directo"
     if not es_admin and (c.ruta == "escritura" or c.pide_info_interna):
         return "rechazar_permiso"
-    if c.ruta == "escritura":
-        return "extraer_operacion"
-    if c.ruta == "datos":
-        return "generar_sql"
-    if c.ruta == "documentos":
-        return "buscar_documentos"
-    return ["generar_sql", "buscar_documentos"]  # hibrida: fan-out en paralelo
+    return "agente"  # lectura (RF-24) o escritura de un administrador (RF-25): el agente reúne y propone
 
 
 def responder_directo(estado: EstadoAgente) -> dict:

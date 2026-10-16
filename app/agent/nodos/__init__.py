@@ -38,17 +38,23 @@ class _Modelos:
 
         return llm_principal()
 
-    def invocar(self, rol: str, prompt, esquema=None):
+    def invocar(self, rol: str, prompt, esquema=None, herramientas=None):
         """Invoca el modelo del ``rol`` (``"rapido"`` o ``"principal"``) con reintentos.
 
         El otro modelo queda como respaldo ante saturación, límites por minuto o cuota diaria agotada
-        (:func:`app.llm.con_reintentos`). Con ``esquema`` usa salida estructurada.
+        (:func:`app.llm.con_reintentos`). Con ``esquema`` usa salida estructurada; con ``herramientas``,
+        ``bind_tools`` (el respaldo recibe las mismas herramientas).
         """
         from app.llm import con_reintentos
 
         def llamada(r: str):
             llm = self.llm_rapido() if r == "rapido" else self.llm_principal()
-            estructurado = llm.with_structured_output(esquema) if esquema is not None else llm
+            if esquema is not None:
+                estructurado = llm.with_structured_output(esquema)
+            elif herramientas is not None:
+                estructurado = llm.bind_tools(herramientas)
+            else:
+                estructurado = llm
 
             def invocar(p):
                 return estructurado.invoke(p)

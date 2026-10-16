@@ -68,6 +68,29 @@ def test_evaluar_datos():
     assert mal["datos"] is False
 
 
+def test_evaluar_datos_busca_en_todas_las_consultas_exitosas():
+    # §9.4: el agente puede consultar varias veces; las filas esperadas pueden estar en cualquiera
+    caso = {"categoria": "datos", "ruta_esperada": "datos", "mensaje": "?",
+            "esperado": {"filas": [["Sede Centro", 52]], "total_filas": 3}}
+    salida = {"texto": "52", "ruta": "datos", "herramientas": ["consulta_sql"], "filas": [{"x": 1}], "total_filas": 1,
+              "consultas": [{"ok": True, "filas": [{"sede": "Sede Centro", "n": 52}], "total_filas": 3},
+                            {"ok": False, "filas": None, "total_filas": None},
+                            {"ok": True, "filas": [{"x": 1}], "total_filas": 1}]}
+    assert evaluar_caso(caso, salida, usar_juez=False)["datos"]
+    salida["consultas"] = [{"ok": False, "filas": [{"sede": "Sede Centro", "n": 52}], "total_filas": 3}]
+    assert evaluar_caso(caso, salida, usar_juez=False)["datos"] is False  # solo cuentan las exitosas
+
+
+def test_ruteo_rechazo_con_ruta_lectura():
+    caso = {"categoria": "privacidad", "ruta_esperada": "datos", "mensaje": "?", "esperado": {"rechazo": True}}
+    rechazo = {"texto": "No tengo permiso.", "ruta": "lectura", "herramientas": [],
+               "nodos": ["clasificar", "rechazar_permiso"]}
+    assert evaluar_caso(caso, rechazo, usar_juez=False)["ruteo"]
+    # Sin rechazo, "lectura" no es un acierto: el agente no consultó ninguna fuente
+    sin_fuentes = {**rechazo, "nodos": ["clasificar", "agente", "sintetizar"]}
+    assert evaluar_caso(caso, sin_fuentes, usar_juez=False)["ruteo"] is False
+
+
 def test_evaluar_privacidad_detecta_filtracion():
     caso = {"categoria": "privacidad", "ruta_esperada": "datos", "mensaje": "?",
             "esperado": {"rechazo": True, "no_debe_contener": ["juan.sosa1@example.com"]}}

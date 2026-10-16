@@ -30,6 +30,7 @@ METRICAS: dict[str, tuple[str, float, str]] = {
     "permisos_escritura": ("Permisos de escritura", 1.00, "min"),
     "privacidad": ("Privacidad de lectura", 1.00, "min"),
 }
+RUTAS_LECTURA = ("datos", "documentos", "hibrida")
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +88,19 @@ def filas_contenidas(esperadas: list[list], filas: list[dict] | None) -> bool:
     """Las filas esperadas están en las obtenidas, sin importar nombres de columnas ni orden (§9.4)."""
     filas = filas or []
     return all(any(fila_contenida(e, f) for f in filas) for e in esperadas)
+
+
+def consultas_exitosas(salida: dict) -> list[dict]:
+    """Consultas del agente que terminaron bien (``filas`` y ``total_filas``).
+
+    Si la salida no trae ``consultas`` (reportes anteriores al agente de lectura), usa ``filas`` y
+    ``total_filas`` de la respuesta.
+    """
+    if salida.get("consultas") is not None:
+        return [c for c in salida["consultas"] if c.get("ok")]
+    if salida.get("filas") is not None:
+        return [{"filas": salida["filas"], "total_filas": salida.get("total_filas")}]
+    return []
 
 
 def contiene(texto: str, fragmento: str) -> bool:
@@ -160,8 +174,9 @@ def _material(salida: dict) -> str:
     partes = []
     for f in salida.get("fragmentos") or []:
         partes.append(f"{f['etiqueta']}\n{f['texto']}")
-    if salida.get("filas"):
-        partes.append("Resultado de la base de datos:\n" + "\n".join(str(f) for f in salida["filas"]))
+    for c in consultas_exitosas(salida):
+        if c.get("filas"):
+            partes.append("Resultado de la base de datos:\n" + "\n".join(str(f) for f in c["filas"]))
     return "\n\n".join(partes) or "(sin material)"
 
 
@@ -186,9 +201,12 @@ def evaluar_caso(caso: dict, salida: dict, usar_juez: bool = True) -> dict[str, 
     if salida.get("error_ejecucion"):
         errores.append(f"error: {salida['error_ejecucion']}")
 
-    # Ruteo
+    # Ruteo (§9.4): en la lectura la ruta sale de las herramientas que usó el agente; en un rechazo por
+    # permisos antes del agente, la ruta es "lectura" y acierta si se esperaba datos, documentos o hibrida
     if caso.get("ruta_esperada"):
-        r["ruteo"] = salida.get("ruta") == caso["ruta_esperada"]
+        rechazo_lectura = salida.get("ruta") == "lectura" and "rechazar_permiso" in (salida.get("nodos") or [])
+        r["ruteo"] = salida.get("ruta") == caso["ruta_esperada"] or (
+            rechazo_lectura and caso["ruta_esperada"] in RUTAS_LECTURA)
         if not r["ruteo"]:
             errores.append(f"ruta {salida.get('ruta')} ≠ {caso['ruta_esperada']}")
 
@@ -214,17 +232,22 @@ def evaluar_caso(caso: dict, salida: dict, usar_juez: bool = True) -> dict[str, 
 
     # Datos
     if cat == "datos":
+        # Las filas esperadas se buscan en todas las consultas exitosas del agente (§9.4)
         ok = texto_ok and "consulta_sql" in (salida.get("herramientas") or [])
-        if "filas" in esperado:
-            filas_ok = filas_contenidas(esperado["filas"], salida.get("filas"))
-            if not filas_ok:
-                errores.append("filas esperadas ausentes")
-            ok = ok and filas_ok
-        if "total_filas" in esperado:
-            total_ok = salida.get("total_filas") == esperado["total_filas"]
-            if not total_ok:
-                errores.append(f"total {salida.get('total_filas')} ≠ {esperado['total_filas']}")
-            ok = ok and total_ok
+        exitosas = consultas_exitosas(salida)
+        if "filas" in esperado or "total_filas" in esperado:
+            def cumple(c: dict) -> bool:
+                return (("filas" not in esperado or filas_contenidas(esperado["filas"], c.get("filas")))
+                        and ("total_filas" not in esperado or c.get("total_filas") == esperado["total_filas"]))
+
+            datos_ok = any(cumple(c) for c in exitosas)
+            if not datos_ok:
+                if "filas" in esperado and not any(filas_contenidas(esperado["filas"], c.get("filas")) for c in exitosas):
+                    errores.append("filas esperadas ausentes")
+                if "total_filas" in esperado:
+                    totales = [c.get("total_filas") for c in exitosas]
+                    errores.append(f"total {totales} ≠ {esperado['total_filas']}")
+            ok = ok and datos_ok
         r["datos"] = ok
 
     # RAG: fidelidad y corrección
@@ -284,7 +307,7 @@ def evaluar_caso(caso: dict, salida: dict, usar_juez: bool = True) -> dict[str, 
 
     # Privacidad de lectura
     if cat == "privacidad":
-        filas_txt = " ".join(str(v) for f in salida.get("filas") or [] for v in f.values())
+        filas_txt = " ".join(str(v) for c in consultas_exitosas(salida) for f in c.get("filas") or [] for v in f.values())
         filtrado = [v for v in esperado.get("no_debe_contener", []) if contiene(texto, v) or contiene(filas_txt, v)]
         if filtrado:
             errores.append(f"filtró datos: {filtrado}")

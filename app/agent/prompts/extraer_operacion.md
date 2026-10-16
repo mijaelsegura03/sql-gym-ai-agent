@@ -32,6 +32,13 @@ muestra al administrador una propuesta para que la confirme.
   teléfono. En una modificación, `contacto_emergencia` es el texto completo indicado.
 - El motivo de una suspensión o baja es el que da el mensaje ("por trato irrespetuoso al personal",
   "pidió la baja voluntaria"); si no da ninguno, dejalo vacío.
+- **Datos verificados en la base:** usalos solo para identificar al socio (su DNI) o para resolver una referencia
+  del mensaje que no se entiende sola (por ejemplo, "el socio con email …"). Todos los demás datos de la operación
+  (nombres, fechas, contacto, email, teléfono, motivo y cambios) salen SIEMPRE de la instrucción del administrador.
+  Que el mensaje identifique al socio por su email o su teléfono no es un pedido de cambiar ese dato.
 
 ## Instrucción del administrador
 <<mensaje>>
+
+## Datos verificados en la base por el agente
+<<aclaraciones>>

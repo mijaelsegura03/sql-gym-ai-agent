@@ -1,8 +1,8 @@
 """Fábrica de modelos de Gemini con reintentos (spec técnico T-02, §1.1).
 
 - :func:`llm_rapido`: modelo rápido (``GEMINI_MODEL_FAST``), usado por el nodo ``clasificar``.
-- :func:`llm_principal`: modelo principal (``GEMINI_MODEL_MAIN``), usado por ``generar_sql``,
-  ``extraer_operacion`` y ``sintetizar``.
+- :func:`llm_principal`: modelo principal (``GEMINI_MODEL_MAIN``), usado por ``agente``
+  (con *tool calling*), ``extraer_operacion`` y ``sintetizar``.
 - :func:`llm_juez`: juez de la evaluación (``GEMINI_MODEL_JUEZ``).
 - :func:`embeddings`: modelo de embeddings (``GEMINI_EMBEDDING_MODEL``).
 

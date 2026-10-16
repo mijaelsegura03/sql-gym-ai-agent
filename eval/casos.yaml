@@ -519,6 +519,30 @@
     - sql: "SELECT count(*) FROM membresia m JOIN socio s ON s.id = m.socio_id WHERE s.dni = '34896217' AND m.estado = 'pendiente'"
       esperado: [[0]]
 
+- id: CA-59
+  categoria: escritura_valida
+  perfil: admin
+  dni_usuario: "30123987"
+  # Ezequiel Ramírez, DNI 24498545, Sede Sur, membresía activa hasta el 13/11/2026. El mensaje no trae el DNI:
+  # el agente lo busca en la base por el email y lo pasa como aclaración a operacion_socio (RF-25)
+  mensaje: "Suspendé al socio con email ezequiel.ramirez5@example.com por prestar su QR a un tercero."
+  ruta_esperada: escritura
+  herramientas_esperadas: [consulta_sql, operacion_socio]
+  accion: confirmar
+  depende_fecha: false
+  esperado:
+    propuesta: true
+    advertencias: [suspension_reintegro]
+  verificacion_db:
+    - sql: "SELECT estado, email FROM socio WHERE dni = '24498545'"
+      esperado: [["suspendido", "ezequiel.ramirez5@example.com"]]
+    - sql: >-
+        SELECT count(*) FROM membresia m JOIN socio s ON s.id = m.socio_id
+        WHERE s.dni = '24498545' AND m.estado IN ('activa','congelada','pendiente') AND m.fecha_fin >= CURRENT_DATE
+      esperado: [[0]]
+    - sql: "SELECT count(*) FROM socio WHERE estado = 'suspendido'"
+      esperado: [[6]]   # 5 en la base inicial: solo se suspende uno
+
 - id: CA-54
   categoria: escritura_valida
   perfil: admin

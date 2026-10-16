@@ -26,6 +26,12 @@ class Fragmento(BaseModel):
     texto: str
     distancia: float | None = None
     titulo_doc: str = ""
+    chunk_id: str = ""
+
+    @property
+    def clave(self) -> str:
+        """Identificador para no repetir fragmentos entre búsquedas: ``chunk_id`` o, si falta, cita y texto."""
+        return self.chunk_id or f"{self.doc_id}|{self.seccion}|{self.pagina}|{self.texto[:80]}"
 
     @property
     def numero_seccion(self) -> str:
@@ -75,5 +81,6 @@ def buscar(consulta: str, k: int | None = None, distancia_max: float | None = No
             continue
         fragmentos.append(Fragmento(doc_id=meta["doc_id"], seccion=meta["seccion"], pagina=int(meta["pagina"]),
                                     texto=texto, distancia=round(float(dist), 4),
-                                    titulo_doc=meta.get("titulo_doc", "")))
+                                    titulo_doc=meta.get("titulo_doc", ""),
+                                    chunk_id=meta.get("chunk_id", "")))
     return fragmentos

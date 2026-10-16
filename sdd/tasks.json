@@ -1,10 +1,10 @@
 {
   "proyecto": "sql-gym-ai-agent — Punto 3 de la consigna",
-  "version": "0.7",
-  "fecha": "2026-10-14",
+  "version": "0.9",
+  "fecha": "2026-10-15",
   "specs": {
-    "funcional": "sdd/functional/spec.md v0.7",
-    "tecnico": "sdd/technical/spec.md v0.8"
+    "funcional": "sdd/functional/spec.md v0.9",
+    "tecnico": "sdd/technical/spec.md v1.0"
   },
   "convenciones": {
     "estado": "pendiente | en_curso | hecha | bloqueada",
@@ -88,6 +88,18 @@
         "T-38",
         "T-39",
         "T-40"
+      ]
+    },
+    {
+      "id": "M8",
+      "nombre": "Exploración del esquema y escritura iniciada por el agente",
+      "fecha_objetivo": "2026-10-16",
+      "tasks": [
+        "T-41",
+        "T-42",
+        "T-43",
+        "T-44",
+        "T-45"
       ]
     }
   ],
@@ -1212,7 +1224,8 @@
       "archivos": [
         "app/agent/herramientas.py",
         "app/agent/estado.py",
-        "tests/test_herramientas.py"
+        "tests/test_herramientas.py",
+        "app/rag/buscador.py"
       ],
       "depende_de": [
         "T-33"
@@ -1226,9 +1239,9 @@
         "tests/test_herramientas.py pasa"
       ],
       "estimacion": "S",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null,
-      "notas": null
+      "notas": "Verificado el 15/10/2026: tests/test_herramientas.py (10 passed). Las herramientas son StructuredTool con args_schema de un solo campo (sql / consulta); la función propia no se ejecuta fuera del grafo. Fragmento incorpora chunk_id para no repetir fragmentos."
     },
     {
       "id": "T-36",
@@ -1277,9 +1290,9 @@
         "Prueba manual con Gemini real: una pregunta de datos, una de documentos y CA-30 (híbrida encadenada) se resuelven con tool calling; si el modelo principal no llama bien las herramientas, se prueba el rápido y se registra en DT-08"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null,
-      "notas": null
+      "notas": "Verificado el 15/10/2026 con Gemini real: una pregunta de datos (1 consulta_sql), una de documentos (1 busqueda_documentos) y CA-30 (consulta_sql y después busqueda_documentos con el motivo obtenido) se resolvieron con tool calling. gemini-3.5-flash-lite llamó bien las herramientas: no hizo falta probar el modelo rápido (DT-08)."
     },
     {
       "id": "T-37",
@@ -1324,7 +1337,10 @@
         "app/agent/nodos/clasificar.py",
         "app/agent/prompts/clasificar.md",
         "app/agent/nodos/sintetizar.py",
-        "app/agent/prompts/sintetizar.md"
+        "app/agent/prompts/sintetizar.md",
+        "app/ui/app.py",
+        "tests/test_ui.py",
+        "app/agent/nodos/__init__.py"
       ],
       "depende_de": [
         "T-36"
@@ -1338,9 +1354,9 @@
         "La interfaz (fuera del SDD) sigue funcionando con la nueva RespuestaAgente; en el detalle se agregan los pasos del agente"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null,
-      "notas": null
+      "notas": "Verificado el 15/10/2026: el grafo coincide con el §5.3 (sin fan-out ni defer). La interfaz muestra los pasos del agente en el detalle, con la SQL solo para el administrador; test_ui.py actualizado."
     },
     {
       "id": "T-38",
@@ -1377,9 +1393,9 @@
         "`pytest` pasa completo (sin los marcados llm)"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null,
-      "notas": null
+      "notas": "Verificado el 15/10/2026: pytest completo sin los marcados llm, 263 passed (36 en test_grafo_rutas.py). El LLM simulado responde a bind_tools con tool_calls."
     },
     {
       "id": "T-39",
@@ -1408,7 +1424,8 @@
       "archivos": [
         "eval/evaluadores.py",
         "scripts/run_eval.py",
-        "eval/resultados/"
+        "eval/resultados/",
+        "tests/test_evaluacion.py"
       ],
       "depende_de": [
         "T-38"
@@ -1420,9 +1437,9 @@
         "DT-08 registra el límite de pasos y el modelo de tool calling que quedan, con la cantidad media de pasos y de llamadas por mensaje de la corrida"
       ],
       "estimacion": "M",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null,
-      "notas": "La corrida usa más llamadas que la anterior (§5.3 técnico): si se agota la cuota diaria, se continúa con `--reanudar`."
+      "notas": "Corrida completa del 15/10/2026 (eval/resultados/2026-10-15_1653_6c06d31-dirty.md): 58 de 58 casos OK y todas las métricas en objetivo; frente al 14/10 (841a79f), la corrección RAG pasa de 70 % a 100 %, p90 12,2 s y mediana 4,6 s. Agente de lectura: 1,33 rondas, 1,43 invocaciones y 2,33 llamadas a agente_lectura por mensaje en promedio; solo CA-33 llegó al límite de 4 rondas. Se mantienen MAX_PASOS_LECTURA = 4 y el modelo principal (DT-08). El reporte lleva el sufijo -dirty porque se corrió antes de commitear la implementación."
     },
     {
       "id": "T-40",
@@ -1440,7 +1457,8 @@
       "archivos": [
         "sdd/functional/spec.md",
         "sdd/technical/spec.md",
-        "sdd/tasks.json"
+        "sdd/tasks.json",
+        "README.md"
       ],
       "depende_de": [
         "T-39"
@@ -1451,9 +1469,211 @@
         "Los artefactos están commiteados en el repositorio de la entrega"
       ],
       "estimacion": "S",
-      "estado": "pendiente",
+      "estado": "hecha",
       "responsable": null,
-      "notas": "Fuera del SDD, en el mismo cierre: README (arquitectura del agente) e informe técnico."
+      "notas": "Specs en estado final (funcional v0.8, técnico v0.9) y tasks cerradas. Trazabilidad: RF-24 en T-35 a T-39 (test_grafo_rutas.py y casos híbridos CA-30 a CA-33); RF-25 en T-35, T-37 y T-38 (test_el_agente_solo_ve_las_herramientas_de_lectura, test_herramienta_desconocida_rechazada, test_socio_con_escritura_nunca_llega_a_extraer_operacion). README actualizado con la arquitectura del agente. Pendiente fuera del SDD: commitear los artefactos y el informe técnico."
+    },
+    {
+      "id": "T-41",
+      "titulo": "SDD: exploración del esquema y escritura propuesta por el agente",
+      "fase": "M8",
+      "descripcion": "Actualizar el spec funcional (RF-24, RF-25, DC-11, CA-59) y el técnico (agente único con herramientas por ruta, describir_tabla, valores_columna, operacion_socio que solo propone, §6.4, DT-10, DT-11) antes de tocar el código.",
+      "spec_tecnico": [
+        "§2",
+        "§5",
+        "§6.4",
+        "§7.1",
+        "§14",
+        "§15"
+      ],
+      "requisitos": [
+        "RF-24",
+        "RF-25",
+        "RNF-01"
+      ],
+      "criterios_aceptacion": [
+        "CA-59"
+      ],
+      "archivos": [
+        "sdd/functional/spec.md",
+        "sdd/technical/spec.md",
+        "sdd/tasks.json"
+      ],
+      "depende_de": [
+        "T-40"
+      ],
+      "definicion_de_hecho": [
+        "Spec funcional v0.9 y técnico v1.0 con historial",
+        "Las decisiones nuevas (DT-10, DT-11) están cerradas y justificadas",
+        "Las tasks T-42 a T-45 cubren los cambios"
+      ],
+      "estimacion": "S",
+      "estado": "hecha",
+      "responsable": null,
+      "notas": "Spec funcional v0.9 y técnico v1.0, escritos antes del código."
+    },
+    {
+      "id": "T-42",
+      "titulo": "Herramientas de exploración del esquema",
+      "fase": "M8",
+      "descripcion": "Implementar app/db/esquema.py (describir_tabla y valores_columna con el rol del perfil, nombres validados contra las listas de validar_sql e identificadores con psycopg.sql) y exponerlas como herramientas del agente con su formato de ToolMessage.",
+      "spec_tecnico": [
+        "§5.7",
+        "§6.4",
+        "DT-11"
+      ],
+      "requisitos": [
+        "RF-24",
+        "RNF-01",
+        "RNF-05"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "app/db/esquema.py",
+        "app/agent/herramientas.py",
+        "app/agent/estado.py",
+        "tests/test_esquema.py",
+        "tests/test_herramientas.py"
+      ],
+      "depende_de": [
+        "T-41"
+      ],
+      "definicion_de_hecho": [
+        "El socio no puede describir ni listar valores de tablas de public: solo vistas de socio_api",
+        "Los conteos y valores del socio salen solo de sus filas",
+        "Un nombre de tabla o columna no permitido o inexistente devuelve ERROR con las alternativas, sin ejecutar SQL armada con ese texto",
+        "tests/test_esquema.py y tests/test_herramientas.py pasan"
+      ],
+      "estimacion": "M",
+      "estado": "hecha",
+      "responsable": null,
+      "notas": "Verificado el 15/10/2026: app/db/esquema.py con describir_tabla y valores_columna; tests/test_esquema.py (8 passed, Docker) y tests/test_herramientas.py. El socio solo explora socio_api y ve solo sus filas; los nombres se validan contra TABLAS_PUBLIC / VISTAS_SOCIO y van como psycopg.sql.Identifier."
+    },
+    {
+      "id": "T-43",
+      "titulo": "Agente único: lectura y preparación de la escritura",
+      "fase": "M8",
+      "descripcion": "Renombrar agente_lectura y herramientas_lectura a agente y ejecutar_herramientas (y el estado), dar al agente las herramientas según la ruta (operacion_socio solo en escritura de un administrador), llevar su salida en escritura siempre a extraer_operacion, pasar las aclaraciones al prompt de extracción y registrar el paso de operacion_socio. Prompt agente.md con la tarea según la ruta.",
+      "spec_tecnico": [
+        "§5.1",
+        "§5.2",
+        "§5.3",
+        "§5.7",
+        "§7.1",
+        "DT-06",
+        "DT-08",
+        "DT-10"
+      ],
+      "requisitos": [
+        "RF-24",
+        "RF-25",
+        "RF-40",
+        "RF-43",
+        "RF-46",
+        "RNF-01",
+        "RNF-02"
+      ],
+      "criterios_aceptacion": [
+        "CA-59",
+        "CA-60",
+        "CA-61"
+      ],
+      "archivos": [
+        "app/agent/nodos/agente.py",
+        "app/agent/nodos/escritura.py",
+        "app/agent/nodos/clasificar.py",
+        "app/agent/grafo.py",
+        "app/agent/estado.py",
+        "app/agent/prompts/agente.md",
+        "app/agent/prompts/extraer_operacion.md",
+        "app/ui/app.py",
+        "tests/test_grafo_rutas.py"
+      ],
+      "depende_de": [
+        "T-42"
+      ],
+      "definicion_de_hecho": [
+        "En una lectura el LLM no recibe operacion_socio y, si la pide, se rechaza con un ToolMessage de error",
+        "Un socio nunca llega al agente en modo escritura",
+        "Toda escritura pasa por extraer_operacion, validar_operacion y confirmar, invoque o no el agente operacion_socio",
+        "Ninguna escritura se ejecuta sin la reanudación con confirmar",
+        "tests/test_grafo_rutas.py pasa"
+      ],
+      "estimacion": "M",
+      "estado": "hecha",
+      "responsable": null,
+      "notas": "Verificado el 15/10/2026: nodos agente y ejecutar_herramientas (app/agent/nodos/agente.py), prompt agente.md con agente_tarea_lectura.md / agente_tarea_escritura.md, aclaraciones en extraer_operacion.md y paso de operacion_socio en el detalle (UI). tests/test_grafo_rutas.py: 45 passed (exploración, operacion_socio rechazada en lectura, propuesta con aclaraciones, sin propuesta y límite de pasos pasan igual por la validación, reanudación del hilo con mensajes del agente). Suite completa: 283 passed."
+    },
+    {
+      "id": "T-44",
+      "titulo": "Evaluación con CA-59 y métricas del agente",
+      "fase": "M8",
+      "descripcion": "Agregar CA-59 a eval/casos.yaml, separar en el reporte los promedios del agente en lectura y escritura y contar el uso de la exploración; correr la evaluación completa y revisar DT-08.",
+      "spec_tecnico": [
+        "§9.2",
+        "§9.3",
+        "DT-08"
+      ],
+      "requisitos": [
+        "RF-72",
+        "RF-73",
+        "RF-75",
+        "RNF-04",
+        "RNF-06"
+      ],
+      "criterios_aceptacion": [
+        "CA-59"
+      ],
+      "archivos": [
+        "eval/casos.yaml",
+        "eval/evaluadores.py",
+        "scripts/run_eval.py",
+        "tests/test_evaluacion.py",
+        "eval/resultados/"
+      ],
+      "depende_de": [
+        "T-43"
+      ],
+      "definicion_de_hecho": [
+        "La corrida completa cumple las métricas del §5.8.1 del spec funcional",
+        "CA-59 deja al socio del email suspendido",
+        "DT-08 registra los promedios de la corrida"
+      ],
+      "estimacion": "S",
+      "estado": "hecha",
+      "responsable": null,
+      "notas": "Corrida completa del 15/10/2026 (eval/resultados/2026-10-15_2053_6c06d31-dirty.md): 59 de 59 OK, todas las métricas en objetivo, p90 14,2 s. CA-59 OK (el agente buscó el DNI por email). Promedios del agente por ruta en el reporte; exploración usada en 0 casos. DT-08 revisada. Experiment de LangSmith eval-6c06d31-dirty-998e6b39."
+    },
+    {
+      "id": "T-45",
+      "titulo": "Cierre de artefactos de la v1.0",
+      "fase": "M8",
+      "descripcion": "Pasar los specs a estado final con lo aprendido, dejar las tasks en 'hecha', actualizar el README y verificar la trazabilidad de RF-24, RF-25 y CA-59.",
+      "spec_tecnico": [
+        "§13",
+        "§15"
+      ],
+      "requisitos": [
+        "R-04"
+      ],
+      "criterios_aceptacion": [],
+      "archivos": [
+        "sdd/functional/spec.md",
+        "sdd/technical/spec.md",
+        "sdd/tasks.json",
+        "README.md"
+      ],
+      "depende_de": [
+        "T-44"
+      ],
+      "definicion_de_hecho": [
+        "Los specs no tienen decisiones abiertas y su estado es final",
+        "RF-24, RF-25 y CA-59 están cubiertos por tests o casos de evaluación"
+      ],
+      "estimacion": "S",
+      "estado": "hecha",
+      "responsable": null,
+      "notas": "Specs en estado final (funcional v0.9, técnico v1.0) y tasks cerradas. Trazabilidad: RF-24 (exploración) en T-42/T-43 (test_exploracion_antes_de_la_consulta, test_esquema.py); RF-25 en T-43 (tests de escritura preparada por el agente) y CA-59 en eval/casos.yaml. README actualizado. Pendiente fuera del SDD: commitear y repetir la evaluación sobre el commit para que el reporte no lleve -dirty."
     }
   ]
 }

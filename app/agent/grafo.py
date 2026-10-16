@@ -3,19 +3,27 @@
 ```
 START → clasificar ─┬─ directa | fuera_dominio | necesita_contexto ─▶ responder_directo ─▶ END
                     ├─ (socio ∧ escritura) | (socio ∧ pide_info_interna) ─▶ rechazar_permiso ─▶ END
-                    ├─ datos ─────▶ generar_sql ⇄ ejecutar_sql ─────────────▶ sintetizar ─▶ END
-                    ├─ documentos ─▶ buscar_documentos ─────────────────────▶ sintetizar ─▶ END
-                    ├─ hibrida ───▶ [generar_sql ⇄ ejecutar_sql] ∥ [buscar_documentos] ─▶ sintetizar ─▶ END
-                    └─ escritura (admin) ─▶ extraer_operacion ─▶ validar_operacion
-                                              ├─ inválida ─▶ responder_operacion ─▶ END
-                                              └─ válida ──▶ confirmar (interrupt)
-                                                              ├─ cancelar ─▶ responder_operacion ─▶ END
-                                                              └─ confirmar ─▶ ejecutar_operacion ─▶ responder_operacion ─▶ END
+                    │
+                    │   AGENTE (ReAct)
+                    ├─ lectura ───────────┐
+                    ├─ escritura (admin) ─┴─▶ agente ── tool_calls ∧ pasos < MAX ──▶ ejecutar_herramientas
+                    │                          ▲  │                                         │
+                    │                          └──┼─────────────────────────────────────────┘
+                    │                             ├─ lectura: sin tool_calls ∨ pasos = MAX ─▶ sintetizar ─▶ END
+                    │   WORKFLOW                  └─ escritura: operacion_socio, o sin tool_calls ∨ pasos = MAX
+                    │                                              │
+                    └────────────────────────────▶ extraer_operacion ─▶ validar_operacion
+                                                     ├─ inválida ─▶ responder_operacion ─▶ END
+                                                     └─ válida ──▶ confirmar (interrupt)
+                                                                     ├─ cancelar ─▶ responder_operacion ─▶ END
+                                                                     └─ confirmar ─▶ ejecutar_operacion ─▶ responder_operacion ─▶ END
 ```
 
 - Las aristas que dependen del perfil se evalúan en código con ``usuario.perfil`` (RNF-01).
-- ``sintetizar`` es un nodo diferido (``defer=True``): en la ruta híbrida espera a que terminen la
-  rama de documentos y la rama SQL (que puede reintentar) y corre una sola vez.
+- El agente es ReAct (RF-24, DT-06): el LLM elige qué herramienta invocar, con qué argumentos y
+  cuándo parar, dentro de ``MAX_PASOS_AGENTE`` rondas. En la escritura de un administrador además
+  propone la operación con ``operacion_socio``, que solo propone (RF-25, DT-10): desde ahí los pasos son
+  fijos, y se recorren también si el agente no la invoca.
 - Cada mensaje usa un ``thread_id`` nuevo (RF-21). El checkpointer en memoria solo sostiene el
   ``interrupt()`` de una propuesta pendiente dentro de su hilo (§5.5).
 
@@ -37,13 +45,12 @@ from langgraph.types import Command
 
 from app.agent.estado import EstadoAgente, RespuestaAgente
 from app.agent.nodos.clasificar import clasificar, rechazar_permiso, responder_directo, ruta_despues_de_clasificar
-from app.agent.nodos.documentos import buscar_documentos
 from app.agent.nodos.escritura import (
     confirmar, ejecutar_operacion, extraer_operacion, responder_operacion, ruta_despues_de_confirmar,
     ruta_despues_de_validar, texto_de_propuesta, validar_operacion,
 )
+from app.agent.nodos.agente import agente, ejecutar_herramientas, ruta_despues_de_agente
 from app.agent.nodos.sintetizar import sintetizar
-from app.agent.nodos.sql import ejecutar_sql, generar_sql, ruta_despues_de_ejecutar
 from app.auth import Usuario
 from app.config import configurar_trazas, get_settings
 from app.ops import auditoria
@@ -53,7 +60,8 @@ log = logging.getLogger(__name__)
 NOMBRE_TRAZA = "agente_gimnasio"
 # Tipos propios que se guardan en el checkpoint mientras una propuesta espera la confirmación
 _TIPOS_CHECKPOINT = [
-    ("app.auth", "Usuario"), ("app.agent.estado", "Clasificacion"), ("app.rag.buscador", "Fragmento"),
+    ("app.auth", "Usuario"), ("app.agent.estado", "Clasificacion"), ("app.agent.estado", "ConsultaEjecutada"),
+    ("app.agent.estado", "PasoAgente"), ("app.rag.buscador", "Fragmento"),
     *[("app.ops.modelos", n) for n in ("AltaSocio", "ModificacionSocio", "CambiosSocio", "ReferenciaSocio",
                                        "ContactoEmergencia", "Suspension", "Reactivacion", "Baja", "FueraDeCatalogo",
                                        "Aviso", "SocioAfectado", "PropuestaCambio", "ResultadoValidacion",
@@ -77,10 +85,9 @@ def construir_grafo(checkpointer=None):
     g.add_node("clasificar", clasificar)
     g.add_node("responder_directo", responder_directo)
     g.add_node("rechazar_permiso", rechazar_permiso)
-    g.add_node("generar_sql", generar_sql)
-    g.add_node("ejecutar_sql", ejecutar_sql)
-    g.add_node("buscar_documentos", buscar_documentos)
-    g.add_node("sintetizar", sintetizar, defer=True)
+    g.add_node("agente", agente)
+    g.add_node("ejecutar_herramientas", ejecutar_herramientas)
+    g.add_node("sintetizar", sintetizar)
     g.add_node("extraer_operacion", extraer_operacion)
     g.add_node("validar_operacion", validar_operacion)
     g.add_node("confirmar", confirmar)
@@ -89,12 +96,12 @@ def construir_grafo(checkpointer=None):
 
     g.add_edge(START, "clasificar")
     g.add_conditional_edges("clasificar", ruta_despues_de_clasificar,
-                            ["responder_directo", "rechazar_permiso", "extraer_operacion", "generar_sql", "buscar_documentos"])
+                            ["responder_directo", "rechazar_permiso", "agente"])
     g.add_edge("responder_directo", END)
     g.add_edge("rechazar_permiso", END)
-    g.add_edge("generar_sql", "ejecutar_sql")
-    g.add_conditional_edges("ejecutar_sql", ruta_despues_de_ejecutar, ["generar_sql", "sintetizar"])
-    g.add_edge("buscar_documentos", "sintetizar")
+    g.add_conditional_edges("agente", ruta_despues_de_agente,
+                            ["ejecutar_herramientas", "sintetizar", "extraer_operacion"])
+    g.add_edge("ejecutar_herramientas", "agente")
     g.add_edge("sintetizar", END)
     g.add_edge("extraer_operacion", "validar_operacion")
     g.add_conditional_edges("validar_operacion", ruta_despues_de_validar, ["confirmar", "responder_operacion"])
@@ -158,6 +165,11 @@ def _armar_respuesta(grafo, usuario: Usuario, thread_id: str, run_id: uuid.UUID,
     ruta = valores.get("ruta_final") or (c.ruta if c else "error")
     texto = texto_de_propuesta(valores) if pendiente else (valores.get("respuesta") or _ERROR_INTERNO[idioma])
     herramientas = list(dict.fromkeys(valores.get("herramientas") or []))
+    consultas = valores.get("consultas") or []
+    pasos = valores.get("pasos") or []
+    if not usuario.es_admin:  # RF-56: el socio no ve la SQL, ni en las consultas ni en los pasos
+        consultas = [c.model_copy(update={"sql": None}) for c in consultas]
+        pasos = [p.model_copy(update={"argumentos": {}}) if p.herramienta == "consulta_sql" else p for p in pasos]
     respuesta = RespuestaAgente(
         texto=texto,
         ruta=ruta,
@@ -170,6 +182,8 @@ def _armar_respuesta(grafo, usuario: Usuario, thread_id: str, run_id: uuid.UUID,
         filas=valores.get("filas"),
         total_filas=valores.get("total_filas"),
         fragmentos=valores.get("fragmentos") or [],
+        consultas=consultas,
+        pasos=pasos,
         propuesta=valores.get("propuesta"),
         propuesta_pendiente=pendiente,
         resultado_operacion=valores.get("ejecucion"),
@@ -217,7 +231,8 @@ def responder(usuario: Usuario, mensaje: str, hoy: date | None = None) -> Respue
     thread_id, run_id, t0 = str(uuid.uuid4()), uuid.uuid4(), time.perf_counter()
     inicial: EstadoAgente = {
         "usuario": usuario, "mensaje": mensaje.strip(), "fecha_hoy": hoy or date.today(), "trace_id": str(run_id),
-        "intentos_sql": 0, "herramientas": [], "nodos": [], "fragmentos": [], "fuentes": [], "citas": [],
+        "mensajes_agente": [], "pasos_agente": 0, "consultas": [], "pasos": [],
+        "herramientas": [], "nodos": [], "fragmentos": [], "fuentes": [], "citas": [],
     }
     try:
         salida = grafo.invoke(inicial, _config(usuario, thread_id, run_id))

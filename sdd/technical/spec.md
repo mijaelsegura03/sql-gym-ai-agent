@@ -2,10 +2,10 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 0.8 |
-| Estado | Aprobado: agente de lectura pendiente de implementación (tasks T-35 a T-40); el resto, implementado |
-| Fecha | 2026-10-14 |
-| Spec funcional de referencia | `sdd/functional/spec.md` v0.7 |
+| Versión | 1.0 |
+| Estado | Final: implementado y evaluado (sin decisiones abiertas) |
+| Fecha | 2026-10-15 |
+| Spec funcional de referencia | `sdd/functional/spec.md` v0.9 |
 | Siguiente artefacto | `sdd/tasks.json` |
 
 > Este documento define **cómo** se implementa lo que pide el spec funcional. Cada decisión
@@ -19,8 +19,8 @@
 | ID | Tema | Decisión | Alternativas descartadas y motivo |
 |---|---|---|---|
 | T-01 | Lenguaje | **Python 3.12+** | — |
-| T-02 | LLM | **Google Gemini** vía `langchain-google-genai`. Dos modelos configurables por variable de entorno: uno **rápido** (clasificación) y uno **principal** (agente de lectura con *tool calling*, extracción y síntesis). | Elegido por el plan gratuito. Ver §1.1. |
-| T-03 | Framework agéntico | **LangGraph** (R-01). Un mismo `StateGraph` combina un **agente ReAct** para la lectura (el LLM con `bind_tools` en un ciclo con el nodo que ejecuta las herramientas, §5.3) y un **flujo fijo** para la escritura (DT-06). | Smolagents: no trae control de flujo explícito ni pausa para confirmar (`interrupt`), que se necesita para RF-46. Un único agente ReAct para todo, con la escritura como una herramienta más: la validación y la confirmación dependerían de que el modelo decida invocarlas (RF-25). `create_react_agent` (prebuilt): ver DT-07. |
+| T-02 | LLM | **Google Gemini** vía `langchain-google-genai`. Dos modelos configurables por variable de entorno: uno **rápido** (clasificación) y uno **principal** (agente con *tool calling*, extracción y síntesis). | Elegido por el plan gratuito. Ver §1.1. |
+| T-03 | Framework agéntico | **LangGraph** (R-01). Un mismo `StateGraph` combina un **agente ReAct** (el LLM con `bind_tools` en un ciclo con el nodo que ejecuta las herramientas, §5.3) y un **flujo fijo** para lo que sigue a una propuesta de escritura: extraer, validar, confirmar con `interrupt()` y ejecutar (DT-06, DT-10). | Smolagents: no trae control de flujo explícito ni pausa para confirmar (`interrupt`), que se necesita para RF-46. Un agente ReAct con una herramienta de escritura que **ejecute**: la validación y la confirmación dependerían de que el modelo decida invocarlas (RF-25); por eso la herramienta `operacion_socio` del agente solo propone y el resto es un flujo fijo. `create_react_agent` (prebuilt): ver DT-07. |
 | T-05 | Evaluación | **Runner propio** (`scripts/run_eval.py`) con reportes versionados en `eval/resultados/` (RF-72 a RF-76). El registro en LangSmith es opcional y queda fuera del SDD. | `langsmith.evaluate()` como ejecución: el orden de los casos y la restauración de la base dependerían de cómo recorre los ejemplos (§9.3). |
 | T-06 | Base relacional | **PostgreSQL 16** en Docker, sin volumen (DC-08) | — |
 | T-07 | Base vectorial | **Chroma** embebida (`chromadb.PersistentClient`) en `.chroma/` (no se versiona) | pgvector: se descartó a favor de un componente separado de la base relacional. |
@@ -38,7 +38,7 @@ Verificado en la documentación de Google el 03/10/2026 (ai.google.dev, páginas
 | Variable | Valor por defecto | Uso | Plan gratuito |
 |---|---|---|---|
 | `GEMINI_MODEL_FAST` | `gemini-3.1-flash-lite` | Nodo `clasificar` | Sí (15 RPM, 500 RPD) |
-| `GEMINI_MODEL_MAIN` | `gemini-3.5-flash-lite` | `agente_lectura`, `extraer_operacion` y `sintetizar` | Sí (15 RPM, 500 RPD) |
+| `GEMINI_MODEL_MAIN` | `gemini-3.5-flash-lite` | `agente`, `extraer_operacion` y `sintetizar` | Sí (15 RPM, 500 RPD) |
 | `GEMINI_MODEL_JUEZ` | `gemini-3.1-flash-lite` | Juez de la evaluación | Sí (15 RPM, 500 RPD) |
 | `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | Indexación y búsqueda | Sí |
 
@@ -46,7 +46,7 @@ Verificado en la documentación de Google el 03/10/2026 (ai.google.dev, páginas
 - **Sin costo:** el proyecto de la key no tiene facturación (plan *Free*): al superar un límite, Gemini devuelve 429 y no cobra. Todo llamado tiene reintentos con *backoff* exponencial ante 429 por minuto y ante 500/503/504 (saturación de Google, frecuente en estos modelos); Los nodos del agente usan el otro modelo como respaldo (`GEMINI_MODEL_FAST` respalda a `GEMINI_MODEL_MAIN` y viceversa): ante un error transitorio el reintento siguiente va al otro modelo sin esperar, y la espera exponencial se hace al volver al primero. El 429 por **límite diario** (`…PerDay…`) no se reintenta sobre ese modelo: se sigue con el respaldo y, si también lo agotó, corta con `CuotaDiariaAgotada`, la evaluación se detiene y la interfaz muestra un mensaje claro. La evaluación limita los requests por minuto con `EVAL_RPM` (12).
 - **Razonamiento:** el modelo rápido usa `thinking_budget=0` (`GEMINI_THINKING_FAST`), porque clasificar no lo necesita. `gemini-3.5-flash-lite` rechaza `thinking_budget=0` (400 `INVALID_ARGUMENT`) y con un presupuesto bajo no cambia la latencia, así que el principal queda con su valor por defecto.
 - **Uso de los datos:** en el plan gratuito, Google puede usar el contenido para mejorar sus productos. Se acepta porque los datos son sintéticos (S-04).
-- **Tool calling:** `agente_lectura` usa `bind_tools` del modelo principal. Si al implementarlo `gemini-3.5-flash-lite` no llama las herramientas de forma confiable (argumentos vacíos, llamadas inventadas), se prueba `gemini-3.1-flash-lite` y la decisión se registra en DT-08. El respaldo entre modelos (`con_reintentos`) se mantiene: el modelo de respaldo recibe las mismas herramientas.
+- **Tool calling:** `agente` usa `bind_tools` del modelo principal. Si al implementarlo `gemini-3.5-flash-lite` no llama las herramientas de forma confiable (argumentos vacíos, llamadas inventadas), se prueba `gemini-3.1-flash-lite` y la decisión se registra en DT-08. El respaldo entre modelos (`con_reintentos`) se mantiene: el modelo de respaldo recibe las mismas herramientas.
 - **Parámetros:** `temperature=0` en todos los nodos (los modelos 3.x *lite* usan valores de muestreo fijos e ignoran la temperatura). Timeout de 30 s por llamada, para que una llamada colgada se reintente pronto.
 
 ---
@@ -60,14 +60,16 @@ Verificado en la documentación de Google el 03/10/2026 (ai.google.dev, páginas
                                  │ invoke / resume        │ RespuestaAgente
                          ┌───────▼───────────────────────┴──────────────┐
                          │ Grafo LangGraph (app/agent)                  │
-                         │  clasificar ─┬─ agente de lectura (ReAct)    │
-                         │              └─ flujo de escritura (fijo)    │
+                         │  clasificar ─▶ agente (ReAct) ──┐            │
+                         │                 propuesta ─▶ flujo de        │
+                         │                 escritura (fijo, interrupt)  │
                          └──┬──────────────┬───────────────┬────────────┘
-                            │ lectura      │ búsqueda      │ escritura
+                            │ lectura y    │ búsqueda      │ escritura
+                            │ exploración  │               │
                ┌────────────▼───┐  ┌───────▼───────┐  ┌────▼────────────────┐
                │ app/db/lectura │  │ app/rag       │  │ app/ops (catálogo)  │
-               │ sqlglot + rol  │  │ Chroma +      │  │ validación + rol    │
-               │ de solo lectura│  │ embeddings    │  │ de escritura        │
+               │ app/db/esquema │  │ Chroma +      │  │ validación + rol    │
+               │ rol de lectura │  │ embeddings    │  │ de escritura        │
                └────────┬───────┘  └───────────────┘  └────┬────────────────┘
                         │                                   │
                   ┌─────▼───────────────────────────────────▼─────┐
@@ -79,17 +81,18 @@ Verificado en la documentación de Google el 03/10/2026 (ai.google.dev, páginas
 ```
 
 **Principio de diseño:** el LLM **interpreta** (qué tipo de mensaje es, qué datos tiene la operación),
-**decide los pasos de la lectura** (qué herramienta invocar, con qué SQL o qué búsqueda, y cuándo parar) y
-**redacta**. Los **permisos** los aplica el código y la base de datos (RNF-01, RNF-02): el perfil sale de la
-sesión, las herramientas de lectura reciben el usuario del estado y no del LLM, la lectura del socio pasa por
-vistas filtradas, la SQL se valida antes de ejecutarse y las escrituras son funciones Python con parámetros
-validados, ejecutadas con un rol distinto, a las que solo se llega por el flujo fijo de escritura.
+**decide los pasos** (qué herramienta invocar, con qué SQL, qué tabla explorar o qué búsqueda, cuándo proponer una
+operación y cuándo parar) y **redacta**. Los **permisos** los aplica el código y la base de datos (RNF-01, RNF-02):
+el perfil sale de la sesión, las herramientas reciben el usuario del estado y no del LLM, la lectura del socio pasa
+por vistas filtradas, la SQL se valida antes de ejecutarse y las escrituras son funciones Python con parámetros
+validados, ejecutadas con un rol distinto, a las que solo se llega por el flujo fijo que sigue a una propuesta.
 
 | Parte | Tipo | Quién decide los pasos |
 |---|---|---|
 | Respuesta directa y rechazos | Un paso (`clasificar`) | — |
-| **Consultas de lectura** | **Agente** (ReAct con herramientas, RF-24) | El LLM, dentro de un límite de pasos |
-| **Operaciones de escritura** | **Workflow** (RF-25) | El grafo: extraer → validar → confirmar → ejecutar |
+| **Consultas de lectura** | **Agente** (ReAct con herramientas de lectura y de exploración, RF-24) | El LLM, dentro de un límite de pasos |
+| **Escritura: reunir datos y proponer** | **Agente** (el mismo, más la herramienta `operacion_socio`, RF-25) | El LLM, dentro del mismo límite |
+| **Escritura: desde la propuesta** | **Workflow** (RF-25) | El grafo: extraer → validar → confirmar → ejecutar |
 
 ---
 
@@ -104,6 +107,7 @@ validados, ejecutadas con un rol distinto, a las que solo se llega por el flujo 
 │   ├── db/
 │   │   ├── conexion.py           # Conexiones por rol (lector_admin, lector_socio, escritor)
 │   │   ├── lectura.py            # validar_sql() + ejecutar_lectura()
+│   │   ├── esquema.py            # describir_tabla() + valores_columna() (exploración, §6.4)
 │   │   └── catalogos/
 │   │       ├── admin.md          # Descripción de tablas y semántica para generar SQL (admin)
 │   │       └── socio.md          # Ídem, solo vistas de socio_api y tablas públicas
@@ -118,7 +122,7 @@ validados, ejecutadas con un rol distinto, a las que solo se llega por el flujo 
 │   └── agent/
 │       ├── estado.py             # EstadoAgente (TypedDict) y RespuestaAgente
 │       ├── grafo.py              # Construcción del StateGraph
-│       ├── herramientas.py       # Herramientas de lectura para bind_tools (§5.7)
+│       ├── herramientas.py       # Herramientas del agente para bind_tools (§5.7)
 │       ├── nodos/                # Nodos agrupados por ruta (§5.2)
 │       └── prompts/              # Prompts versionados en .md
 ├── data/
@@ -270,9 +274,9 @@ class EstadoAgente(TypedDict):
     mensaje: str
     fecha_hoy: date                       # fecha real (RF-06)
     clasificacion: Clasificacion | None   # salida de `clasificar`
-    # Agente de lectura (§5.7)
-    mensajes_lectura: Annotated[list[AnyMessage], add_messages]  # conversación interna del agente, solo de este mensaje
-    pasos_lectura: int                    # rondas de herramientas ejecutadas (límite: MAX_PASOS_LECTURA)
+    # Agente (§5.7)
+    mensajes_agente: Annotated[list[AnyMessage], add_messages]   # conversación interna del agente, solo de este mensaje
+    pasos_agente: int                     # rondas de herramientas ejecutadas (límite: MAX_PASOS_AGENTE)
     consultas: Annotated[list[ConsultaEjecutada], operator.add]  # cada invocación de consulta_sql
     pasos: Annotated[list[PasoAgente], operator.add]             # cada invocación de herramienta, para el detalle
     sql: str | None                       # de la última consulta exitosa (o de la última, si ninguna lo fue)
@@ -285,7 +289,7 @@ class EstadoAgente(TypedDict):
     validacion: ResultadoValidacion | None
     propuesta: PropuestaCambio | None
     decision: Literal["confirmar", "cancelar"] | None
-    herramientas: Annotated[list[str], operator.add]   # "consulta_sql", "busqueda_documentos", "operacion_socio"
+    herramientas: Annotated[list[str], operator.add]   # nombres de las herramientas invocadas (§5.7)
     respuesta: str | None
     fuentes: list[str]
     citas: list[str]                      # "DOC-0X §N" citados en el texto (RF-10)
@@ -298,7 +302,7 @@ class EstadoAgente(TypedDict):
 
 ```python
 class ConsultaEjecutada(BaseModel):
-    sql: str
+    sql: str | None                       # None en la respuesta al socio (RF-56)
     ok: bool
     error: str | None
     columnas: list[str] | None
@@ -306,13 +310,17 @@ class ConsultaEjecutada(BaseModel):
     total_filas: int | None
 
 class PasoAgente(BaseModel):
-    herramienta: Literal["consulta_sql", "busqueda_documentos"]
-    argumentos: dict                      # {"sql": ...} o {"consulta": ...}
-    resumen: str                          # "12 filas", "error: ...", "4 fragmentos (DOC-01, DOC-04)"
+    herramienta: Literal["consulta_sql", "busqueda_documentos", "describir_tabla", "valores_columna",
+                         "operacion_socio"]
+    argumentos: dict                      # los del LLM; {} en consulta_sql para el socio (RF-56)
+    resumen: str                          # "12 filas", "error: ...", "4 fragmentos (DOC-01, DOC-04)", "propuesta lista"
 ```
 
-`intentos_sql` se quita: los reintentos son pasos del agente. `mensajes_lectura` vive en el hilo del mensaje
-actual y nunca se reutiliza en otro mensaje (RF-21).
+`intentos_sql` se quita: los reintentos son pasos del agente. `mensajes_agente` vive en el hilo del mensaje
+actual y nunca se reutiliza en otro mensaje (RF-21). En la v1.0 `mensajes_lectura`, `pasos_lectura` y
+`MAX_PASOS_LECTURA` pasan a llamarse `mensajes_agente`, `pasos_agente` y `MAX_PASOS_AGENTE`, porque el mismo agente
+atiende la lectura y la preparación de la escritura. Para no repetir fragmentos entre búsquedas, `Fragmento` incorpora
+`chunk_id` desde los metadatos de Chroma (§8.1 paso 5).
 
 El DNI del usuario **no** forma parte del estado; solo su `id` y su seudónimo.
 
@@ -323,11 +331,11 @@ El DNI del usuario **no** forma parte del estado; solo su `id` y su seudónimo.
 | `clasificar` | LLM rápido, salida estructurada | Devuelve `Clasificacion` (§5.4): `directa`, `fuera_dominio`, `necesita_contexto`, `lectura` o `escritura`. Si es `directa` o `fuera_dominio`, también devuelve la respuesta, así esos mensajes se resuelven con **una sola llamada al LLM y ninguna herramienta**. No elige las fuentes de la lectura. | RF-14 a RF-17, RF-20, RF-21 |
 | `responder_directo` | Determinístico | Copia la respuesta de la clasificación al estado. No invoca herramientas. | RF-15, RF-16 |
 | `rechazar_permiso` | Determinístico | Respuesta fija (en el idioma del mensaje) para un socio que pide escribir o información interna. | RF-40, RF-53 |
-| `agente_lectura` | LLM principal con `bind_tools` (herramientas de lectura, §5.7) | Con el prompt `agente_lectura.md` (catálogo del perfil, fecha, regla de fuente de verdad y reglas de SQL) y `mensajes_lectura`, decide el siguiente paso: devuelve un `AIMessage` con una o más `tool_calls`, o sin `tool_calls` cuando ya tiene información suficiente. Escribe la SQL directamente como argumento de `consulta_sql`. | RF-01, RF-06 a RF-08, RF-12, RF-18, RF-24 |
-| `herramientas_lectura` | Determinístico: ejecuta las `tool_calls` | Ejecuta cada llamada con el `usuario` del estado (nunca un argumento del LLM), agrega un `ToolMessage` por llamada con el resultado resumido (§5.7) y acumula `consultas`, `fragmentos`, `pasos` y `herramientas`. Un error de validación o de ejecución de la SQL vuelve como `ToolMessage` de error (RNF-05). | RF-02, RF-04, RF-05, RF-09, RF-13, RNF-01, RNF-05 |
+| `agente` | LLM principal con `bind_tools` (§5.7) | Con el prompt `agente.md` (tarea según la ruta, catálogo del perfil, fecha, regla de fuente de verdad y reglas de SQL) y `mensajes_agente`, decide el siguiente paso: devuelve un `AIMessage` con una o más `tool_calls`, o sin `tool_calls` cuando ya tiene información suficiente. Escribe la SQL directamente como argumento de `consulta_sql`. En la ruta `lectura` recibe las herramientas de lectura y de exploración; en la ruta `escritura` (solo administrador), además `operacion_socio`. | RF-01, RF-06 a RF-08, RF-12, RF-18, RF-24, RF-25 |
+| `ejecutar_herramientas` | Determinístico: ejecuta las `tool_calls` | Ejecuta cada llamada de lectura o de exploración con el `usuario` del estado (nunca un argumento del LLM), agrega un `ToolMessage` por llamada con el resultado resumido (§5.7) y acumula `consultas`, `fragmentos`, `pasos` y `herramientas`. Un error de validación o de ejecución vuelve como `ToolMessage` de error (RNF-05). No ejecuta `operacion_socio`: esa llamada la atiende la arista hacia `extraer_operacion` (§5.3). | RF-02, RF-04, RF-05, RF-09, RF-13, RF-24, RNF-01, RNF-05 |
 | `sintetizar` | LLM principal | Redacta la respuesta con las consultas y los fragmentos que reunió el agente, en el idioma del mensaje. Saca las citas del texto y arma las citas y las fuentes en código (§8.4). Fija `ruta_final` según las herramientas usadas (§5.3). | RF-10, RF-11, RF-14, RF-18, RF-19, RF-22 |
-| `extraer_operacion` | LLM principal, salida estructurada | Convierte el mensaje en una `OperacionSocio` (§7.1). | §5.5 funcional |
-| `validar_operacion` | Determinístico (herramienta `operacion_socio`) | Resuelve el socio, verifica alcance y reglas (§7.2) y arma la `PropuestaCambio`. | RF-41 a RF-45 |
+| `extraer_operacion` | LLM principal, salida estructurada | Convierte el mensaje del administrador en una `OperacionSocio` (§7.1). Si el agente invocó `operacion_socio`, suma sus `aclaraciones` (los datos que el agente encontró en la base) al prompt, separadas del mensaje original. | RF-25, §5.5 funcional |
+| `validar_operacion` | Determinístico (herramienta `operacion_socio`) | Resuelve el socio, verifica alcance y reglas (§7.2) y arma la `PropuestaCambio`. Registra el paso de `operacion_socio` del agente, si lo hubo. | RF-41 a RF-45 |
 | `confirmar` | `interrupt()` | Pausa el grafo y devuelve la propuesta a quien llamó al agente. Se reanuda con `Command(resume={"decision": ...})`. | RF-46, RF-47 |
 | `ejecutar_operacion` | Determinístico | Revalida, ejecuta en una transacción y registra la auditoría (§7.3). | RF-48, RF-49, RNF-03 |
 | `responder_operacion` | Determinístico, con plantillas es/en | Arma el mensaje del rechazo, la cancelación o el resultado. | RF-45, RF-48 |
@@ -339,31 +347,44 @@ START → clasificar ─┬─ directa | fuera_dominio | necesita_contexto ─�
                     ├─ (socio ∧ escritura) | (socio ∧ pide_info_interna) ─▶ rechazar_permiso ─▶ END
                     │
                     │   AGENTE (ReAct)
-                    ├─ lectura ─▶ agente_lectura ──── tool_calls ∧ pasos < MAX ───▶ herramientas_lectura
-                    │                  ▲   │                                              │
-                    │                  │   └── sin tool_calls ∨ pasos = MAX ─▶ sintetizar ─▶ END
-                    │                  └──────────────────────────────────────────────────┘
-                    │
-                    │   WORKFLOW
-                    └─ escritura (admin) ─▶ extraer_operacion ─▶ validar_operacion
-                                              ├─ inválida ─▶ responder_operacion ─▶ END
-                                              └─ válida ──▶ confirmar (interrupt)
-                                                              ├─ cancelar ─▶ responder_operacion ─▶ END
-                                                              └─ confirmar ─▶ ejecutar_operacion ─▶ responder_operacion ─▶ END
+                    ├─ lectura ─────────────┐
+                    ├─ escritura (admin) ───┴─▶ agente ── tool_calls ∧ pasos < MAX ──▶ ejecutar_herramientas
+                    │                            ▲  │                                         │
+                    │                            │  │                                         │
+                    │                            └──┼─────────────────────────────────────────┘
+                    │                               ├─ lectura: sin tool_calls ∨ pasos = MAX ─▶ sintetizar ─▶ END
+                    │                               │
+                    │   WORKFLOW                    └─ escritura: pide operacion_socio,
+                    │                                  o termina sin pedirla ∨ pasos = MAX
+                    │                                                    │
+                    └────────────────────────────────▶ extraer_operacion ◀┘ ─▶ validar_operacion
+                                                         ├─ inválida ─▶ responder_operacion ─▶ END
+                                                         └─ válida ──▶ confirmar (interrupt)
+                                                                         ├─ cancelar ─▶ responder_operacion ─▶ END
+                                                                         └─ confirmar ─▶ ejecutar_operacion ─▶ responder_operacion ─▶ END
 ```
 
 - **Las aristas condicionales que dependen del perfil se evalúan en código** con `usuario.perfil`
   (RNF-01). Aunque el LLM clasifique un mensaje de un socio como `escritura`, el socio no llega
-  nunca a `extraer_operacion`.
-- **Ciclo del agente de lectura:** `agente_lectura` → `herramientas_lectura` → `agente_lectura` mientras el LLM
-  pida herramientas y `pasos_lectura < MAX_PASOS_LECTURA` (4, DT-08). Si el LLM pide varias herramientas en el mismo
-  mensaje (llamadas paralelas), se ejecutan todas y cuentan como un paso. Al llegar al límite, la arista va a
-  `sintetizar` aunque el LLM haya pedido más herramientas; esas llamadas no se ejecutan (RF-24). El
+  nunca al agente en modo escritura ni a `extraer_operacion`, y `operacion_socio` solo se le ofrece al LLM en la
+  ruta `escritura` de un administrador.
+- **Ciclo del agente:** `agente` → `ejecutar_herramientas` → `agente` mientras el LLM pida herramientas de lectura o
+  de exploración y `pasos_agente < MAX_PASOS_AGENTE` (4, DT-08). Si el LLM pide varias herramientas en el mismo
+  mensaje (llamadas paralelas), se ejecutan todas y cuentan como un paso. Al llegar al límite, la arista sale del
+  ciclo aunque el LLM haya pedido más herramientas; esas llamadas no se ejecutan (RF-24). El
   `recursion_limit` del grafo (30) queda por encima de este límite.
+- **Salida del ciclo según la ruta:** en `lectura` va a `sintetizar`. En `escritura` va siempre a
+  `extraer_operacion` (DT-10): si el último mensaje del agente pide `operacion_socio` (aunque se haya llegado al
+  límite, y aunque pida otras herramientas en el mismo mensaje, que no se ejecutan), con sus `aclaraciones`; si el
+  agente terminó sin pedirla o llegó al límite, sin aclaraciones, con lo que `extraer_operacion` interpreta el
+  mensaje original igual que en la v0.9. Así un pedido de escritura siempre termina en una propuesta o en un
+  rechazo, y la validación y la confirmación nunca dependen del LLM (RF-25).
+- **Sin reintentos después de la validación:** si `validar_operacion` rechaza la operación, el grafo va a
+  `responder_operacion` y no vuelve al agente (DT-10).
 - **Ruta informada en la lectura (RF-14):** `sintetizar` fija `ruta_final` con las herramientas usadas:
   solo `consulta_sql` → `datos`; solo `busqueda_documentos` → `documentos`; las dos → `hibrida`. Si el agente no
   invocó ninguna (el prompt le pide consultar al menos una fuente), la ruta es `lectura` y `sintetizar`
-  responde que no encontró información (RF-05, RF-11). Así los valores de `ruta_esperada` de la evaluación (`datos`, `documentos`, `hibrida`) no cambian.
+  responde con un mensaje fijo, sin llamar al LLM, que no encontró información (RF-05, RF-11). Así los valores de `ruta_esperada` de la evaluación (`datos`, `documentos`, `hibrida`) no cambian.
 - Se quitan el *fan-out* de la ruta híbrida y el `defer=True` de `sintetizar`: el orden y la combinación de fuentes
   los decide el agente.
 - `responder_directo` también atiende la ruta `necesita_contexto`. `rechazar_permiso` informa como ruta la de la
@@ -374,22 +395,26 @@ START → clasificar ─┬─ directa | fuera_dominio | necesita_contexto ─�
   socios, la consulta falla o vuelve vacía y `sintetizar` responde que no hay información
   disponible para ese perfil. El agente puede reformular la SQL varias veces, pero todas pasan por el
   mismo validador y el mismo rol.
-- **El agente de lectura no tiene herramientas de escritura** (RF-25): `bind_tools` recibe solo `consulta_sql` y
-  `busqueda_documentos`, y `herramientas_lectura` rechaza cualquier otro nombre de herramienta con un
-  `ToolMessage` de error.
+- **En una lectura el agente no tiene herramientas de escritura** (RF-25): `bind_tools` recibe solo las herramientas
+  de lectura y de exploración, y `ejecutar_herramientas` rechaza cualquier otro nombre de herramienta (incluido
+  `operacion_socio` fuera de la ruta `escritura`) con un `ToolMessage` de error.
 
 **Llamadas al LLM por mensaje (RNF-06):**
 
 | Ruta | Llamadas | Herramientas |
 |---|---|---|
 | directa / fuera de dominio | 1 | ninguna |
-| lectura con una herramienta (datos o documentos) | 4: `clasificar` + 2 de `agente_lectura` + `sintetizar` | `consulta_sql` o `busqueda_documentos` |
+| lectura con una herramienta (datos o documentos) | 4: `clasificar` + 2 de `agente` + `sintetizar` | `consulta_sql` o `busqueda_documentos` |
 | lectura híbrida encadenada | 5 (4 si pide las dos herramientas en paralelo) | las dos |
-| lectura, máximo | 7: `clasificar` + 5 de `agente_lectura` (una por cada uno de los 4 pasos y la última, cuyas `tool_calls` ya no se ejecutan) + `sintetizar` | hasta 4 rondas |
-| escritura | 2 | `operacion_socio` |
+| lectura con exploración previa | una llamada más de `agente` por cada ronda de exploración | `describir_tabla`, `valores_columna` |
+| lectura, máximo | 7: `clasificar` + 5 de `agente` (una por cada uno de los 4 pasos y la última, cuyas `tool_calls` ya no se ejecutan) + `sintetizar` | hasta 4 rondas |
+| escritura con el socio identificado en el mensaje | 3: `clasificar` + 1 de `agente` (pide `operacion_socio`) + `extraer_operacion` | `operacion_socio` |
+| escritura con búsqueda previa | 4 o más: una llamada más de `agente` por cada ronda de lectura | las de lectura y `operacion_socio` |
+| escritura, máximo | 7: `clasificar` + 5 de `agente` + `extraer_operacion` | hasta 4 rondas |
 
-Frente a la v0.7 (3 llamadas en datos, 2 en documentos), la lectura usa una o dos llamadas más por mensaje. Con
-500 RPD por modelo alcanza para una evaluación completa por día; `EVAL_RPM` se mantiene.
+Frente a la v0.7 (3 llamadas en datos, 2 en documentos), la lectura usa una o dos llamadas más por mensaje, y
+frente a la v0.9 la escritura usa una más (la del agente que propone). Con 500 RPD por modelo alcanza para una
+evaluación completa por día; `EVAL_RPM` se mantiene.
 
 ### 5.4 Salida de `clasificar`
 
@@ -404,8 +429,7 @@ class Clasificacion(BaseModel):
 El prompt de `clasificar` incluye el perfil (para adaptar la respuesta a "¿qué podés hacer?"),
 ejemplos de mensajes mixtos (RF-17) y de mensajes que dependen de un contexto previo (RF-21). Se quitan
 `pregunta_datos` y `consulta_documentos`: la pregunta para la base y la búsqueda en los documentos las arma el
-agente de lectura como argumentos de las herramientas. La regla de fuente de verdad (RF-18) pasa al prompt del
-agente de lectura.
+agente como argumentos de las herramientas. La regla de fuente de verdad (RF-18) pasa al prompt del agente.
 
 ### 5.5 Independencia entre mensajes y confirmación
 
@@ -452,23 +476,34 @@ reejecutar al recargar la página) y `descartar(usuario, thread_id)`.
 
 Las filas se devuelven en `filas`, tomadas del resultado de la consulta y no del texto del LLM (RF-03). Con perfil socio, `consultas` y `pasos` se devuelven sin la SQL (RF-56): se filtra en código, igual que `sql`.
 
-### 5.7 Herramientas de lectura (`app/agent/herramientas.py`)
+### 5.7 Herramientas del agente (`app/agent/herramientas.py`)
 
 Se definen como herramientas de LangChain (nombre, descripción y esquema Pydantic de argumentos) para
-`bind_tools`. El LLM ve solo los argumentos; el usuario y la conexión los pone `herramientas_lectura`.
+`bind_tools`. El LLM ve solo los argumentos; el usuario y la conexión los pone `ejecutar_herramientas`.
 
-| Herramienta | Argumentos (los elige el LLM) | Ejecuta | Resultado para el LLM (`ToolMessage`) |
-|---|---|---|---|
-| `consulta_sql` | `sql: str` (una sentencia `SELECT`) | `ejecutar_lectura(sql, usuario)` (§6.2, §6.3) | Columnas, total de filas y hasta 50 filas en JSON; o `ERROR: <motivo>` (validación o ejecución) |
-| `busqueda_documentos` | `consulta: str` (en castellano, §8.3) | `buscar(consulta)` (§8.2) | Cada fragmento con su etiqueta `[DOC-0X §N, p. P]` y su texto; o `SIN RESULTADOS` |
+| Herramienta | Ruta | Argumentos (los elige el LLM) | Ejecuta | Resultado para el LLM (`ToolMessage`) |
+|---|---|---|---|---|
+| `consulta_sql` | lectura y escritura | `sql: str` (una sentencia `SELECT`) | `ejecutar_lectura(sql, usuario)` (§6.2, §6.3) | Columnas, total de filas y hasta 50 filas en JSON; o `ERROR: <motivo>` (validación o ejecución) |
+| `busqueda_documentos` | lectura y escritura | `consulta: str` (en castellano, §8.3) | `buscar(consulta)` (§8.2) | Cada fragmento con su etiqueta `[DOC-0X §N, p. P]` y su texto; o `SIN RESULTADOS` |
+| `describir_tabla` | lectura y escritura | `tabla: str` | `describir_tabla(tabla, usuario)` (§6.4) | Columnas con tipo y si admiten nulos, claves foráneas y cantidad de filas visibles; o `ERROR: <motivo>` |
+| `valores_columna` | lectura y escritura | `tabla: str`, `columna: str` | `valores_columna(tabla, columna, usuario)` (§6.4) | Hasta 30 valores distintos con su cantidad de filas, más el total de valores distintos; o `ERROR: <motivo>` |
+| `operacion_socio` | solo escritura (admin) | `aclaraciones: str` (opcional) | Ninguna en `ejecutar_herramientas`: la arista lleva a `extraer_operacion` → `validar_operacion` (§5.3, DT-10) | — (el agente no vuelve a ejecutarse) |
 
 - Las descripciones de las herramientas explican qué contiene cada fuente (las mismas de "Fuentes que existen" del
-  prompt actual de `clasificar`) y la regla de fuente de verdad (RF-18), para que el LLM elija bien.
-- El prompt `agente_lectura.md` reúne lo que hoy está en `generar_sql.md` (catálogo, reglas de SQL, fecha, reglas
-  del perfil) más las instrucciones de planificación: consultar al menos una fuente; preferir la base para hechos y
-  los documentos para reglas; si una consulta falla, leer el error y corregirla; buscar en los documentos en
-  castellano aunque el mensaje esté en inglés; terminar sin llamar herramientas cuando la información alcanza.
-  El agente **no redacta la respuesta final**: la redacta `sintetizar` (DT-09).
+  prompt actual de `clasificar`) y la regla de fuente de verdad (RF-18), para que el LLM elija bien. Las de
+  exploración aclaran que son para dudas puntuales sobre nombres o valores, porque el catálogo ya está en el prompt.
+- La descripción de `operacion_socio` dice que **solo propone**: el sistema interpreta el pedido del administrador,
+  lo valida y muestra la propuesta para que la confirme. `aclaraciones` lleva solo lo que el agente encontró en la
+  base y el mensaje no dice de forma directa (por ejemplo, "el socio con email X es el DNI 24498545"); no repite ni
+  completa los datos del pedido. Los datos de la operación salen siempre del mensaje original (§7.1).
+- El prompt `agente.md` reúne el catálogo, las reglas de SQL, la fecha y las reglas del perfil, más las
+  instrucciones de planificación: consultar al menos una fuente; preferir la base para hechos y los documentos para
+  reglas; explorar el esquema solo ante una duda concreta; si una consulta falla, leer el error y corregirla; buscar
+  en los documentos en castellano aunque el mensaje esté en inglés; terminar sin llamar herramientas cuando la
+  información alcanza. La tarea cambia según la ruta (`<<tarea>>`): en `lectura`, reunir información (el agente
+  **no redacta la respuesta final**: la redacta `sintetizar`, DT-09); en `escritura`, identificar lo que el pedido no
+  dice de forma directa y llamar a `operacion_socio` una sola vez (directamente, sin consultar la base, si el
+  mensaje ya trae el DNI o es un alta).
 - Los decoradores `@traceable(run_type="tool")` actuales se mantienen, así cada invocación aparece como
   herramienta en las trazas (fuera del SDD).
 
@@ -485,7 +520,7 @@ semántica del §4.7, sinónimos del dominio (RF-08: "moroso", "MP", "la sede de
 la semántica es lo que más impacta en la calidad de la SQL. El esquema completo entra en el prompt:
 son 17 tablas.
 
-Reglas que se le piden a `agente_lectura` para la SQL de `consulta_sql`:
+Reglas que se le piden a `agente` para la SQL de `consulta_sql`:
 
 - Una sola sentencia `SELECT` (se permite `WITH`).
 - Cuando la consulta filtra personas por nombre, devolver también el DNI y el nombre completo, para
@@ -516,6 +551,30 @@ Si la validación falla, el error vuelve al agente como resultado de `consulta_s
 5. Convierte los tipos para la salida: `Decimal` a `float` redondeado, fechas a ISO.
 
 Hay tres barreras independientes: el validador, el rol de solo lectura y la transacción `READ ONLY`.
+
+### 6.4 Exploración del esquema (`app/db/esquema.py`)
+
+Dos funciones para las herramientas `describir_tabla` y `valores_columna` (§5.7, RF-24). La SQL la escribe el código,
+no el LLM: el LLM solo elige los nombres, que se validan contra una lista y se insertan como identificadores
+(`psycopg.sql.Identifier`), nunca como texto.
+
+1. **Resolución del nombre:** se acepta `tabla` o `esquema.tabla`, sin distinguir mayúsculas. Con perfil
+   administrador, las tablas de `public` (`TABLAS_PUBLIC`) y `agente.auditoria`; con perfil socio, las vistas de
+   `socio_api` (`VISTAS_SOCIO`). Las mismas listas que usa `validar_sql` (§6.2). Cualquier otro nombre devuelve un
+   error con la lista de nombres permitidos.
+2. **Conexión:** la misma que `ejecutar_lectura` (§6.3): rol del perfil, transacción `READ ONLY` y, para el socio,
+   `app.socio_id` fijado, así los conteos y los valores salen solo de las filas que el perfil puede ver.
+3. **`describir_tabla`:** columnas, tipos y nulabilidad de `information_schema.columns`; claves foráneas de
+   `pg_constraint` (las vistas no tienen); cantidad de filas visibles con `count(*)`.
+4. **`valores_columna`:** verifica que la columna exista en la tabla (si no, devuelve el error con las columnas
+   disponibles) y ejecuta `SELECT <columna>::text, count(*) … GROUP BY 1 ORDER BY 2 DESC LIMIT 30` más el total de
+   valores distintos. Si hay más de 30, informa que muestra los 30 más frecuentes.
+5. Los errores (nombre no permitido, columna inexistente, error de la base) vuelven como texto, igual que en
+   `ejecutar_lectura`, para que el agente corrija el pedido (RNF-05).
+
+Con perfil administrador, `valores_columna` sobre una columna de datos personales (por ejemplo `socio.email`)
+devuelve lo mismo que una consulta de lectura que el administrador ya puede hacer; con perfil socio solo ve sus
+propias filas. No agrega permisos nuevos.
 
 ---
 
@@ -569,6 +628,13 @@ Los campos son opcionales **a propósito** (también los de `ContactoEmergencia`
 inventa, lo deja vacío y la validación lo informa (RF-45). El prompt lo indica explícitamente. `cambios` es un
 modelo con campos opcionales en lugar de un `dict` porque la salida estructurada de Gemini no admite diccionarios
 con claves libres. La salida del LLM se envuelve en `ExtraccionOperacion(operacion: OperacionSocio)`.
+
+**Entrada de `extraer_operacion` (v1.0):** el prompt `extraer_operacion.md` recibe el mensaje del administrador y,
+si el agente invocó `operacion_socio`, sus `aclaraciones` en un bloque aparte ("Datos verificados en la base por el
+agente"). El prompt indica usar las aclaraciones solo para identificar al socio o resolver referencias del mensaje,
+y tomar los datos de la operación (nombres, fechas, contacto, motivo, cambios) del mensaje original. Sin
+aclaraciones, el bloque dice "ninguno" y la extracción es la misma que en la v0.9. Los modelos de este apartado no
+cambian: el agente no arma la `OperacionSocio`, la arma `extraer_operacion` con salida estructurada (DT-10).
 
 Los errores y advertencias de la validación son `Aviso(codigo, params)`; el texto en castellano o inglés lo arman
 las plantillas de `app/ops/mensajes.py` (nodo `responder_operacion`), sin pasar por el LLM.
@@ -648,7 +714,7 @@ transacción propia).
 
 ### 8.3 Idioma
 
-`agente_lectura` escribe el argumento `consulta` de `busqueda_documentos` en castellano, porque los PDFs están en
+`agente` escribe el argumento `consulta` de `busqueda_documentos` en castellano, porque los PDFs están en
 castellano (lo indican el prompt y la descripción de la herramienta), y `sintetizar` responde en el idioma del
 mensaje manteniendo las citas (RF-13). El agente puede hacer varias búsquedas con consultas distintas; los
 fragmentos se acumulan sin repetir.
@@ -723,7 +789,10 @@ Fuera del SDD (criterio de observabilidad de la consigna). El agente funciona si
 5. `EVAL_RPM` limita los requests por minuto a Gemini (un limitador global en `app/llm.py` que solo activa la
    evaluación). Los casos con `valido_hasta` vencido se omiten y se informan en el reporte.
 6. Cada corrida genera `eval/resultados/<fecha>_<commit>.md` con la tabla de métricas y el detalle por caso
-   (RF-73), y un `.json` con el detalle completo. Los dos se versionan, para comparar corridas (RF-75).
+   (RF-73), y un `.json` con el detalle completo. Los dos se versionan, para comparar corridas (RF-75). Si el código
+   evaluado tiene cambios sin commitear, el commit lleva el sufijo `-dirty`. El reporte incluye además los promedios
+   del agente (rondas de herramientas, invocaciones y llamadas a `agente` por mensaje, DT-08), separados en casos
+   de lectura y de escritura, y cuántos casos usaron las herramientas de exploración.
 7. Después de cada caso se guarda el progreso en `eval/resultados/en_curso.json` (no versionado). Si la corrida
    se corta (Ctrl+C, cuota diaria, saturación de Gemini), `--reanudar` la continúa con los mismos casos, juez,
    commit y fecha: saltea los casos ya evaluados y repite los que terminaron con error del agente. Un corte por
@@ -798,8 +867,9 @@ Fuera del SDD: la consigna pide especificar solo el agente. La interfaz consume 
 | `test_ejecucion_ops.py` | Atomicidad (falla a mitad → sin cambios), revalidación y auditoría | Docker |
 | `test_auth.py` | Socio válido, admin válido (los 3 roles), instructor, empleado inactivo, DNI cruzado entre perfiles | Docker |
 | `test_ingesta.py` | Chunking por sección, metadatos, tablas convertidas a Markdown | — |
-| `test_grafo_rutas.py` | Con el LLM simulado: cada ruta recorre los nodos esperados; con perfil socio nunca se llega a `extraer_operacion`. Agente de lectura con `tool_calls` simuladas: una herramienta, las dos encadenadas, las dos en paralelo, error de SQL corregido en el paso siguiente, corte en `MAX_PASOS_LECTURA`, herramienta desconocida rechazada, `ruta_final` derivada de las herramientas y SQL filtrada en `consultas` y `pasos` con perfil socio | — |
-| `test_herramientas.py` | Esquemas de argumentos de las herramientas de lectura (el usuario no es un argumento) y formato de los `ToolMessage` (filas, error, fragmentos con etiqueta, sin resultados) | — |
+| `test_grafo_rutas.py` | Con el LLM simulado: cada ruta recorre los nodos esperados; con perfil socio nunca se llega a `extraer_operacion`. Agente con `tool_calls` simuladas: una herramienta, las dos encadenadas, las dos en paralelo, exploración antes de la consulta, error de SQL corregido en el paso siguiente, corte en `MAX_PASOS_AGENTE`, herramienta desconocida rechazada, `operacion_socio` rechazada en una lectura, `ruta_final` derivada de las herramientas y SQL filtrada en `consultas` y `pasos` con perfil socio. Escritura: el agente solo ve `operacion_socio` en la ruta `escritura` de un administrador; búsqueda en la base y propuesta con aclaraciones (llegan a `extraer_operacion`); el agente que termina sin proponer o llega al límite pasa igual por `extraer_operacion` y `validar_operacion`; ninguna escritura sin `confirmar` | — |
+| `test_herramientas.py` | Esquemas de argumentos de las herramientas (el usuario no es un argumento), herramientas por ruta y formato de los `ToolMessage` (filas, error, fragmentos con etiqueta, sin resultados) | — |
+| `test_esquema.py` | `describir_tabla` y `valores_columna`: nombres permitidos por perfil (el socio no puede describir `public.socio`), columna inexistente, valores y conteos solo de las filas del socio, identificadores no inyectables | Docker |
 | `test_datos.py` | Los casos necesarios de los datos (§9.4) | Docker |
 | `test_catalogos.py` | Los catálogos cubren todas las tablas o vistas y sus ejemplos se ejecutan con el rol del perfil | Docker |
 | `test_evaluacion.py` | Comparación de valores, evaluadores y runner de escritura con LLM simulado | Docker (parcial) |
@@ -814,11 +884,11 @@ Los tests que requieren Docker se marcan con `@pytest.mark.db`.
 
 | Funcional | Técnico |
 |---|---|
-| RF-01 a RF-08 | §5.2 `agente_lectura` / `herramientas_lectura`, §5.7, §6 |
+| RF-01 a RF-08 | §5.2 `agente` / `ejecutar_herramientas`, §5.7, §6 |
 | RF-09 a RF-13 | §8 |
 | RF-14 a RF-19 | §5.2 a §5.4 |
-| RF-24 | §2, §5.2, §5.3, §5.7, DT-06 a DT-09 |
-| RF-25 | §2, §5.3, §7, DT-06 |
+| RF-24 | §2, §5.2, §5.3, §5.7, §6.4, DT-06 a DT-09, DT-11 |
+| RF-25 | §2, §5.2, §5.3, §5.7, §7.1, DT-06, DT-10 |
 | RF-20 a RF-23 | §5.4, §5.5, prompts de `sintetizar` |
 | RF-40 a RF-49, OP-01 a OP-05 | §5.3, §7, §4.5 |
 | RF-50 a RF-56 | `app/auth.py`, §4.3, §4.4, §5.6 |
@@ -838,10 +908,12 @@ Los tests que requieren Docker se marcan con `@pytest.mark.db`.
 | DT-02 | ¿Qué DNI se usa en cada caso de evaluación y en las preguntas de ejemplo? | Se eligen de los datos cargados, un socio representativo de cada situación, y quedan documentados en el encabezado de `eval/casos.yaml` y en el README. | Cerrada |
 | DT-03 | En la **suspensión**, ¿qué membresías se cancelan? | La `activa`, la `congelada` y la `pendiente` con `fecha_fin >= hoy`. Un socio suspendido no puede usar ninguna. Se refleja en OP-03 del spec funcional (v0.4). | Cerrada |
 | DT-04 | Valor de `RAG_DISTANCIA_MAX` | `0.45`. Con `gemini-embedding-001` las distancias coseno están muy juntas: el mejor fragmento relevante queda entre 0,18 y 0,25, pero otros fragmentos necesarios aparecen hasta 0,36 (la tabla de sanciones de DOC-01 §7 para "¿qué pasa si un socio presta su QR?"), y los de un tema no cubierto (mascotas, CA-24) arrancan en 0,27. El umbral no separa por sí solo: se deja permisivo (0,35 cortaba fragmentos necesarios) y `sintetizar` decide si los fragmentos cubren la pregunta (RF-11). | Cerrada |
-| DT-06 | ¿Qué partes son agente y qué partes son workflow? (DC-11 funcional) | **Lectura: agente ReAct** (`agente_lectura` ⇄ `herramientas_lectura`): el LLM elige herramienta, argumentos y cuándo parar. **Escritura: workflow** (`extraer_operacion` → `validar_operacion` → `confirmar` → `ejecutar_operacion`). En la lectura, un error del modelo cuesta a lo sumo una consulta de más, y los permisos están en las herramientas y en la base. En la escritura, la validación y la confirmación tienen que ocurrir siempre, así que no pueden depender de que el modelo las invoque. `clasificar` se mantiene como primer paso: resuelve las respuestas directas con una sola llamada y sin herramientas (métrica al 100 %) y aplica los rechazos por perfil en código antes de entrar al agente. Reemplaza al ruteo fijo datos / documentos / híbrida y al *fan-out* de la v0.7. | Cerrada |
+| DT-06 | ¿Qué partes son agente y qué partes son workflow? (DC-11 funcional) | **Lectura y preparación de la escritura: agente ReAct** (`agente` ⇄ `ejecutar_herramientas`): el LLM elige herramienta, argumentos y cuándo parar, y en la ruta `escritura` cuándo proponer con `operacion_socio`. **Escritura desde la propuesta: workflow** (`extraer_operacion` → `validar_operacion` → `confirmar` → `ejecutar_operacion`). En la lectura, un error del modelo cuesta a lo sumo una consulta de más, y los permisos están en las herramientas y en la base. En la escritura, la validación y la confirmación tienen que ocurrir siempre, así que no pueden depender de que el modelo las invoque: la herramienta del agente solo lleva al workflow, y el workflow corre también si el agente no la invoca (DT-10). Hasta la v0.9 la escritura era un workflow completo, sin agente. `clasificar` se mantiene como primer paso: resuelve las respuestas directas con una sola llamada y sin herramientas (métrica al 100 %) y aplica los rechazos por perfil en código antes de entrar al agente. Reemplaza al ruteo fijo datos / documentos / híbrida y al *fan-out* de la v0.7. | Cerrada |
 | DT-07 | ¿`create_react_agent` (prebuilt) o nodos propios? | **Nodos propios** en el mismo `StateGraph`: las herramientas necesitan el `usuario` del estado (no un argumento del LLM), tienen que acumular `consultas`, `fragmentos` y `pasos` en el estado para `sintetizar` y la respuesta, y el límite de pasos y la salida hacia `sintetizar` se controlan en la arista condicional. Con el prebuilt habría que resolver lo mismo con `InjectedState` y un subgrafo aparte, sin ventajas. | Cerrada |
-| DT-08 | Límite de pasos del agente de lectura | `MAX_PASOS_LECTURA = 4` rondas de herramientas. Alcanza para una consulta, una corrección de SQL y una búsqueda en los documentos con margen, y deja el peor caso en 7 llamadas al LLM por mensaje (RNF-06). Se revisa con la corrida de evaluación de T-39; el modelo usado para el *tool calling* también se registra acá. | Cerrada (revisable en T-39) |
+| DT-08 | Límite de pasos del agente | `MAX_PASOS_AGENTE = 4` rondas de herramientas (hasta la v0.9, `MAX_PASOS_LECTURA`; el mismo límite vale para la ruta `escritura`, y una ronda de exploración cuenta como cualquier otra). Alcanza para una consulta, una corrección de SQL y una búsqueda en los documentos con margen, y deja el peor caso en 7 llamadas al LLM por mensaje (RNF-06). **Revisado en T-39** con la corrida completa del 15/10/2026 (`eval/resultados/2026-10-15_1653_6c06d31-dirty.md`, 58 de 58 casos OK, todas las métricas en objetivo): en los 21 casos que entraron al agente hubo en promedio 1,33 rondas de herramientas, 1,43 invocaciones y 2,33 llamadas a `agente_lectura` por mensaje (unas 4,3 llamadas al LLM contando `clasificar` y `sintetizar`). Solo CA-33 llegó al límite (4 rondas: tres consultas a la base y una búsqueda) y respondió bien; CA-24 (tema no cubierto) reformuló la búsqueda dos veces. Se mantiene el límite. **Modelo de *tool calling*:** `gemini-3.5-flash-lite` (el principal) llamó las herramientas de forma confiable (argumentos completos, sin herramientas inventadas), así que no hizo falta probar `gemini-3.1-flash-lite`; este queda solo como respaldo de `con_reintentos`, con las mismas herramientas. **Revisado en T-44** con la corrida completa del 15/10/2026 de la v1.0 (`eval/resultados/2026-10-15_2053_6c06d31-dirty.md`, 59 de 59 casos OK, todas las métricas en objetivo, p90 14,2 s y mediana 4,9 s): en los 21 casos de lectura, 1,38 rondas y 2,38 llamadas a `agente` por mensaje; en los 23 casos de escritura que entraron al agente, 0,09 rondas y 1,09 llamadas (el agente propuso con `operacion_socio` en los 23 y solo consultó la base en CA-59, donde hacía falta, y en CA-69). Ningún caso usó las herramientas de exploración, como se buscaba (DT-11): el catálogo del prompt alcanzó. Se mantiene el límite. | Cerrada |
 | DT-09 | ¿El agente de lectura redacta la respuesta final? | No: cuando deja de pedir herramientas, la respuesta la redacta `sintetizar` con lo que reunió el agente. Así se conservan sin cambios las citas y las fuentes armadas en código (§8.4, RF-10, RF-19), las reglas de redacción (RF-07, RF-11, RF-22) y el mensaje fijo ante errores (RF-23). Cuesta una llamada más por mensaje. | Cerrada |
+| DT-10 | ¿Cómo propone el agente una operación de escritura? (RF-25) | Con la herramienta `operacion_socio(aclaraciones)`, que **no** recibe la `OperacionSocio` como argumento: la `OperacionSocio` la sigue armando `extraer_operacion` con salida estructurada, a partir del mensaje original más las aclaraciones del agente. Motivos: (1) los datos de la operación salen del mensaje del administrador y no de una reescritura del modelo, así que el agente no puede agregar ni cambiar datos sin que el administrador los haya escrito; (2) se reutiliza la extracción y sus reglas, ya evaluadas (no inventar datos, fechas, edad); (3) el esquema de la herramienta queda simple, sin la unión discriminada de seis modelos, que es la parte más frágil del *tool calling*. Cuesta la llamada de `extraer_operacion`, igual que antes. **Si el agente no propone** (termina sin `tool_calls` o llega al límite), se pasa igual a `extraer_operacion` sin aclaraciones: el resultado es el de la v0.9, así el comportamiento anterior es el piso. **Sin reintentos tras una validación fallida:** el rechazo se informa con las plantillas (RF-45 pide que el administrador reenvíe la instrucción completa); volver al agente lo tentaría a completar datos faltantes que el administrador no dio. | Cerrada |
+| DT-11 | ¿Cómo se implementa la exploración del esquema? (RF-24) | Dos herramientas, `describir_tabla` y `valores_columna`, que consultan la base **en vivo** con el rol del perfil (§6.4), en lugar de devolver partes del catálogo escrito a mano: así responden con lo que realmente hay (nombres de columnas, valores existentes y su frecuencia) y no con lo que dice el catálogo. El catálogo completo sigue en el prompt (§6.1): la exploración es para dudas puntuales y el prompt pide no usarla cuando el catálogo ya responde, para no sumar rondas (RNF-04, RNF-06). Se descartó una herramienta de "filas de ejemplo": `consulta_sql` ya lo permite. | Cerrada |
 | DT-05 | ¿Se cumple RNF-04 (p90 < 15 s) con los modelos del plan gratuito? | No. Corrida completa del 03/10/2026 (`eval/resultados/2026-10-03_2046_f00bf93.md`, 58 casos): mediana 11,5 s y p90 40,4 s. La cola la arman las demoras de Gemini, no el grafo: los 6 casos de más de 40 s tuvieron una llamada colgada hasta el timeout de 30 s y un reintento, y hubo 8 timeouts y 7 respuestas 503 en total. Sin los casos con incidentes de Gemini (45 de 58), la mediana es 10,6 s y el p90 24,9 s, todavía por encima del objetivo: los modelos *lite* del plan gratuito tardan de 4 a 8 s por llamada y una consulta de datos o híbrida encadena 3 o 4. Se mantiene el timeout de 30 s: bajarlo recorta la cola, pero hace reintentar respuestas largas que sí iban a llegar. Se acepta como limitación conocida (DC-10 del spec funcional); con un modelo pago o un plan con más cuota, el objetivo es alcanzable sin cambios de diseño. | Cerrada |
 
 ---
@@ -858,3 +930,5 @@ Los tests que requieren Docker se marcan con `@pytest.mark.db`.
 | 0.6 | 2026-10-04 | Cierre: DT-05 (RNF-04 medido en la corrida completa y aceptado como limitación del plan gratuito). §11: la interfaz queda fuera del SDD (la consigna lo pide solo para el agente); se quitan T-04, la tabla de Streamlit, `app/ui/` del §3, `test_ui.py` del §12 y la fila de RF-60 a RF-67 de la trazabilidad, y §2, §5.5 y §5.6 se redactan sin depender de la interfaz. Por el mismo motivo salen el arranque y la infraestructura (T-14, §4.1 y §10 quedan como notas; §10 conserva solo la configuración) y las trazas (§9.1 queda como nota; T-05 pasa a ser el runner propio de evaluación, con LangSmith opcional). Se quitan las referencias a RF-77 (eliminado del spec funcional v0.5). |
 | 0.8 | 2026-10-14 | Lectura agéntica (spec funcional v0.7, RF-24 y RF-25). T-03 y §2: un `StateGraph` con un agente ReAct para la lectura y un workflow para la escritura (DT-06, DT-07). §5.1: estado del agente (`mensajes_lectura`, `pasos_lectura`, `consultas`, `pasos`; se quita `intentos_sql`). §5.2 y §5.3: `generar_sql`, `ejecutar_sql` y `buscar_documentos` se reemplazan por `agente_lectura` y `herramientas_lectura`, con límite de pasos (DT-08); se quitan el *fan-out* y el `defer` de `sintetizar`, que se mantiene como paso final (DT-09) y deriva la ruta de las herramientas usadas; nuevas llamadas por mensaje. §5.4: `Clasificacion` con la ruta `lectura` y sin `pregunta_datos` ni `consulta_documentos`. §5.6: `consultas` y `pasos` en la respuesta. Nueva §5.7 (herramientas de lectura). §1.1, §6.1, §6.2, §8.3, §9.4, §12 y §13 se ajustan. |
 | 0.7 | 2026-10-04 | §8.4: las citas se sacan del texto de la respuesta y viajan en `citas` (estado y `RespuestaAgente`); `fuentes` usa el título de cada documento citado (`titulo_doc` en `Fragmento`). Sigue a la v0.6 del spec funcional. |
+| 0.9 | 2026-10-15 | Cierre de la lectura agéntica (T-35 a T-40). §5.1: `ConsultaEjecutada.sql` admite `None` y `PasoAgente.argumentos` queda vacío en `consulta_sql` para el socio (RF-56); `Fragmento` incorpora `chunk_id` para no repetir fragmentos. §5.3: sin herramientas, `sintetizar` responde con un mensaje fijo y sin LLM. §9.3: sufijo `-dirty` en el commit del reporte y promedios del agente de lectura. DT-08 revisada con la corrida completa del 15/10/2026 (58 de 58 casos OK) y modelo de *tool calling* registrado. Estado final. |
+| 1.0 | 2026-10-15 | Exploración del esquema y escritura iniciada por el agente (spec funcional v0.9, RF-24, RF-25 y CA-59). T-03, §2 y DT-06: el agente ReAct atiende la lectura y la preparación de la escritura; desde la propuesta, la escritura sigue siendo un workflow. §5.1 a §5.3: `agente_lectura` y `herramientas_lectura` pasan a llamarse `agente` y `ejecutar_herramientas` (y el estado, `mensajes_agente` y `pasos_agente`); en la ruta `escritura` el agente recibe además `operacion_socio`, y su salida va siempre a `extraer_operacion` (también si no propone); nuevas llamadas por mensaje. §5.7: herramientas `describir_tabla`, `valores_columna` y `operacion_socio`, y prompt `agente.md` con la tarea según la ruta. Nueva §6.4 (`app/db/esquema.py`). §7.1: `extraer_operacion` recibe las aclaraciones del agente. §3, §8.3, §9.3, §12 y §13 se ajustan. Nuevas DT-10 y DT-11. Implementado y evaluado (T-41 a T-45): 59 de 59 casos OK y DT-08 revisada. Estado final. |

@@ -10,7 +10,7 @@ Hay tres barreras independientes (RNF-01, RNF-02):
 3. La transacción ``READ ONLY``.
 
 Los errores (de validación o de la base) se devuelven como texto en :class:`ResultadoLectura`
-para que ``generar_sql`` corrija la consulta, sin cortar el proceso (RNF-05).
+para que el agente de lectura corrija la consulta en el paso siguiente, sin cortar el proceso (RNF-05).
 """
 
 from __future__ import annotations

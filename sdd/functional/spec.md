@@ -2,9 +2,9 @@
 
 | Campo | Valor |
 |---|---|
-| Versión | 0.7 |
-| Estado | Aprobado: lectura agéntica pendiente de implementación (tasks T-35 a T-40) |
-| Fecha | 2026-10-14 |
+| Versión | 0.9 |
+| Estado | Final: implementado y evaluado (sin decisiones abiertas) |
+| Fecha | 2026-10-15 |
 | Alcance | Punto 3 de la consigna (`consigna/enunciado_tp_2026.md`) |
 | Siguiente artefacto | `sdd/technical/` (spec técnico) |
 
@@ -39,13 +39,15 @@ cargar los datos a mano.
 1. decida si hace falta consultar alguna fuente o si puede responder directamente (por ejemplo, un saludo);
 2. si hace falta, decida **por sí mismo, paso a paso,** qué fuente consultar (base de datos, documentos o ambas), con
    qué consulta y cuándo tiene información suficiente, y responda de forma correcta y fundamentada;
-3. para un administrador, ejecute operaciones de gestión de socios sobre la base mediante un **flujo fijo**, siempre
-   con confirmación previa;
+3. para un administrador, ejecute operaciones de gestión de socios sobre la base: el agente puede investigar en la
+   base antes de proponer la operación (por ejemplo, encontrar al socio a partir de su email), pero la validación,
+   la propuesta, la confirmación previa y la ejecución siguen siempre los mismos pasos;
 4. respete en todos los casos lo que cada perfil puede ver y hacer.
 
-El agente tiene así dos modos de trabajo (DC-11): las **consultas de lectura** son **agénticas** (el agente
-planifica y encadena las herramientas de lectura) y las **operaciones de escritura** siguen un **flujo de trabajo
-predefinido** (los pasos y su orden no los decide el modelo).
+El agente trabaja así con dos niveles de autonomía (DC-11): las **consultas de lectura** son **agénticas** (el agente
+planifica y encadena las herramientas de lectura) y en las **operaciones de escritura** el agente decide cómo reunir
+los datos y cuándo proponer la operación, mientras que lo que pasa **después** de proponerla (validar, mostrar la
+propuesta, esperar la confirmación y ejecutar) es un **flujo de trabajo predefinido** que el modelo no puede saltear.
 
 ### 1.1 Criterios de la consigna que cubre este spec
 
@@ -96,10 +98,11 @@ las tres sedes (DC-03).
 | Término | Definición |
 |---|---|
 | Fuente | Lugar del que el agente obtiene información: la **base de datos** o los **documentos**. |
-| Herramienta (tool) | Capacidad que el agente invoca para actuar fuera del modelo: consultar la base, buscar en los documentos o ejecutar una operación de escritura. |
+| Herramienta (tool) | Capacidad que el agente invoca para actuar fuera del modelo: consultar la base, explorar su estructura, buscar en los documentos o proponer una operación de escritura. |
 | Ruta | Forma en que se trató un mensaje (§5.3). En las consultas de lectura, la ruta (datos, documentos o híbrida) queda determinada por las fuentes que el agente decidió consultar. |
 | Consulta de lectura | Mensaje que se responde con información de la base, de los documentos o de ambos. El agente la resuelve en **pasos**: en cada uno decide qué herramienta de lectura invocar o si ya puede responder (RF-24). |
-| Flujo de escritura | Secuencia fija de pasos de una operación de escritura: interpretar el pedido, validarlo, mostrar la propuesta, esperar la confirmación y ejecutar (RF-25). |
+| Exploración del esquema | Consulta de la estructura de la base que el agente puede hacer antes de escribir una consulta: qué columnas tiene una tabla y qué valores toma un campo (RF-24). |
+| Flujo de escritura | Secuencia de una operación de escritura: el agente reúne los datos que le falten y propone la operación; desde ahí los pasos son fijos: interpretar el pedido, validarlo, mostrar la propuesta, esperar la confirmación y ejecutar (RF-25). |
 | Respuesta directa | Respuesta que el agente da **sin invocar ninguna herramienta**. |
 | Operación de escritura | Cambio en la base que solo puede pedir un administrador, dentro del catálogo del §5.5. |
 | Propuesta de cambio | Resumen de una operación de escritura que el agente muestra **antes** de ejecutarla, para que el administrador la confirme o la cancele. |
@@ -115,7 +118,7 @@ las tres sedes (DC-03).
 
 - Preguntas en lenguaje natural sobre datos (base) y sobre políticas (documentos).
 - Respuestas directas, sin herramientas, para mensajes conversacionales y fuera de dominio.
-- Ruteo automático entre las rutas del §5.3: consultas de lectura resueltas por el agente de forma autónoma y operaciones de escritura con un flujo fijo.
+- Ruteo automático entre las rutas del §5.3: consultas de lectura resueltas por el agente de forma autónoma y operaciones de escritura que el agente prepara y propone, con validación, confirmación y ejecución fijas.
 - Dos perfiles (Socio y Administrador) con permisos de lectura y escritura distintos.
 - Operaciones de gestión de socios para el administrador, con confirmación previa y auditoría.
 - Evaluación del agente con un conjunto de pruebas.
@@ -169,8 +172,8 @@ las tres sedes (DC-03).
 | RF-16 | **Fuera de dominio, sin herramientas.** Las preguntas que no tienen relación con el gimnasio ("¿Quién ganó el último mundial?") se rechazan con amabilidad, sin invocar herramientas, indicando qué tipo de consultas sí se pueden hacer. |
 | RF-17 | **Mensajes mixtos.** Si un mensaje combina un saludo con una consulta real ("Hola, ¿cuándo vence mi cuota?"), la consulta se resuelve normalmente con las herramientas que correspondan. El saludo no hace que se saltee la consulta. |
 | RF-18 | **Regla de fuente de verdad:** los hechos operativos (precios vigentes, horarios y grilla, cupos, estados, fechas, montos) salen de la base. Las reglas, los procedimientos y las explicaciones salen de los documentos. Los propios documentos indican que precios y horarios se consultan en el sistema (DOC-02 §Resumen, DOC-03 §Resumen). Si la base y un documento parecen contradecirse, el agente prioriza la base para los hechos y menciona la diferencia. |
-| RF-24 | **Consultas de lectura agénticas.** El agente resuelve una consulta de lectura en pasos. En cada paso decide, a partir del mensaje y de lo que obtuvo en los pasos anteriores, si invoca una herramienta de lectura (consultar la base o buscar en los documentos), con qué consulta, o si ya tiene información suficiente para responder. Puede invocar varias veces la misma herramienta, combinar las dos y usar el resultado de una para decidir la siguiente (por ejemplo, consultar el motivo del último acceso rechazado de un socio y después buscar en el reglamento cómo se regulariza ese motivo). La cantidad de pasos por mensaje es acotada (RNF-06): al llegar al límite, responde con la información que reunió. |
-| RF-25 | **Operaciones de escritura como flujo fijo.** Las operaciones de escritura no las planifica el agente: siguen siempre los mismos pasos en el mismo orden (interpretar el pedido, validarlo con las reglas del catálogo, mostrar la propuesta, esperar la confirmación explícita y ejecutar), como se describe en el §5.5. Durante una consulta de lectura el agente no tiene disponible ninguna herramienta de escritura. |
+| RF-24 | **Consultas de lectura agénticas.** El agente resuelve una consulta de lectura en pasos. En cada paso decide, a partir del mensaje y de lo que obtuvo en los pasos anteriores, si invoca una herramienta de lectura (consultar la base, explorar su estructura o buscar en los documentos), con qué consulta, o si ya tiene información suficiente para responder. Puede invocar varias veces la misma herramienta, combinar varias y usar el resultado de una para decidir la siguiente (por ejemplo, consultar el motivo del último acceso rechazado de un socio y después buscar en el reglamento cómo se regulariza ese motivo). **Explorar la estructura** significa consultar qué columnas (con su tipo y sus relaciones) tiene una tabla o vista, o qué valores toma un campo y cuántas veces aparece cada uno; el agente lo usa cuando duda de un nombre o de un valor antes de escribir la consulta. Las herramientas de exploración solo muestran las tablas o vistas que el perfil puede leer, con los mismos filtros que las consultas (RNF-01). La cantidad de pasos por mensaje es acotada (RNF-06): al llegar al límite, responde con la información que reunió. |
+| RF-25 | **Operaciones de escritura propuestas por el agente, con pasos obligatorios.** En un pedido de escritura de un administrador, el agente puede usar las herramientas de lectura para reunir lo que el pedido no dice de forma directa (por ejemplo, encontrar el DNI de un socio a partir de su email o de un dato de la base) y decide cuándo **proponer** la operación con la herramienta de escritura, que solo propone: no ejecuta nada. Desde ahí los pasos son siempre los mismos y en el mismo orden, sin que el agente pueda saltearlos ni cambiarlos: interpretar el pedido, validarlo con las reglas del catálogo, mostrar la propuesta, esperar la confirmación explícita y ejecutar (§5.5). Si el agente termina sin proponer, el sistema interpreta igual el pedido original, así que un pedido de escritura siempre termina en una propuesta o en un rechazo. Se propone **una sola** operación por mensaje (RF-43). Durante una consulta de lectura, y con perfil Socio en cualquier caso, el agente no tiene disponible ninguna herramienta de escritura. |
 | RF-19 | La respuesta termina indicando qué fuente o fuentes se usaron: "base de datos" y el nombre de cada documento citado, sin secciones ni páginas (por ejemplo: "Fuente: base de datos · Política de Membresías, Pagos y Bajas"). En las respuestas directas no se indica ninguna fuente. |
 
 ### 5.4 Idioma y forma de la respuesta
@@ -261,7 +264,7 @@ sin cambios; la corrida completa del 03/10/2026 los alcanza todos (58 de 58 caso
 
 | ID | Requisito |
 |---|---|
-| RNF-01 | **Permisos aplicados fuera del modelo.** Las restricciones de lectura del perfil Socio, la imposibilidad de escribir del Socio, el catálogo de operaciones, el alcance de sede y la confirmación obligatoria se garantizan en el sistema, no solo en las instrucciones al modelo de lenguaje. Un mensaje malicioso no debe poder saltearlos. En las consultas de lectura el modelo elige qué herramienta invocar y con qué argumentos, pero cada herramienta aplica los permisos del perfil identificado, sin importar lo que pida el modelo. |
+| RNF-01 | **Permisos aplicados fuera del modelo.** Las restricciones de lectura del perfil Socio, la imposibilidad de escribir del Socio, el catálogo de operaciones, el alcance de sede y la confirmación obligatoria se garantizan en el sistema, no solo en las instrucciones al modelo de lenguaje. Un mensaje malicioso no debe poder saltearlos. El modelo elige qué herramienta invocar y con qué argumentos, pero cada herramienta aplica los permisos del perfil identificado, sin importar lo que pida el modelo. La herramienta de escritura solo propone: la validación, la confirmación y la ejecución no dependen de que el modelo las pida. |
 | RNF-02 | **Escrituras controladas.** El modelo de lenguaje nunca ejecuta sentencias de escritura que haya generado libremente: las escrituras pasan solo por las operaciones del catálogo, con parámetros validados. Las consultas de lectura no pueden modificar la base. |
 | RNF-03 | **Atomicidad.** Una operación de escritura se aplica completa (incluidos sus efectos secundarios, como la cancelación de la membresía) o no se aplica. |
 | RNF-04 | **Tiempo de respuesta:** el 90 % de los mensajes se responde en menos de 15 segundos en un entorno local. Las respuestas directas deberían ser notablemente más rápidas porque no invocan herramientas. **No se cumple con el plan gratuito de Gemini** (limitación aceptada, DC-10). |
@@ -340,6 +343,7 @@ El agente llega a esta ruta porque decide consultar las dos fuentes (RF-24); no 
 | CA-52 | Admin central | Suspendé al socio con DNI *S* por trato irrespetuoso al personal. | Propuesta: estado activo → suspendido, membresía vigente → cancelada, advertencia sobre el reintegro parcial. Tras confirmar se aplican los dos cambios juntos (RNF-03). |
 | CA-53 | Admin central | Dá de baja al socio con DNI *B* (sin membresía activa ni congelada), pidió la baja voluntaria. | Propuesta de baja. Tras confirmar, el estado es baja y su historial se conserva. |
 | CA-58 | Admin central | Dá de baja al socio con DNI *P* (su única membresía vigente está pendiente). | La propuesta advierte que la membresía pendiente se cancela. Tras confirmar, se aplican los dos cambios juntos (RNF-03). |
+| CA-59 | Admin central | Suspendé al socio con email *E* por prestar su QR a un tercero. *(El mensaje no trae el DNI ni el nombre.)* | El agente busca en la base al socio con ese email y propone la suspensión de ese socio (RF-25). Tras confirmar, el socio queda suspendido y su membresía vigente cancelada. |
 | CA-54 | Admin central | Reactivá al socio con DNI *R* (suspendido). | Propuesta de reactivación con la aclaración de que necesita una membresía nueva. |
 | CA-55 | Admin | Dá de alta a … *(alta válida)* y después cancelo la propuesta | No se crea ningún socio. La auditoría registra la propuesta cancelada (RF-47). |
 | CA-56 | Admin | Dá de alta a … *(alta válida)* y, sin confirmar, envío otro mensaje | La propuesta se descarta; no se crea el socio (RF-47). |
@@ -403,7 +407,7 @@ El agente llega a esta ruta porque decide consultar las dos fuentes (RF-24); no 
 | DC-07 | ¿Cómo se logra que la evaluación sea estable? | El script de datos se modifica para usar **fechas fijas** en lugar de `CURRENT_DATE`, preferentemente concentradas entre agosto y octubre de 2026 (es una referencia, no un límite estricto). El agente usa la **fecha real del sistema** (RF-06). Los resultados esperados son valores fijos (RF-76, S-05). |
 | DC-08 | ¿Qué pasa con los cambios y la auditoría al reiniciar? | La aplicación crea la base de cero en cada ejecución, así que siempre arranca en el estado inicial. Las escrituras y la auditoría guardadas en la base se pierden al reiniciar, lo que se acepta para el trabajo práctico (RF-49). |
 | DC-09 | ¿Se llevan todas las tablas a 15 registros o más (R-03)? | No. `sede` (3), `plan` (10), `actividad` (10) y `sala` (11) son catálogos del dominio y quedan por debajo: llevarlos a 15 multiplica los registros de las tablas que dependen de ellos (sesiones, reservas, accesos, membresías y pagos) y obliga a recalcular los resultados esperados de la evaluación. La consigna se cumple con las otras 13 tablas, que superan ampliamente los 15 registros. **Riesgo aceptado**: si se exige la lectura estricta ("cada una"), se justifica en el coloquio. |
-| DC-11 | ¿Qué partes del agente deciden sus propios pasos? | Las **consultas de lectura** son agénticas (RF-24): el modelo elige herramientas, argumentos y cuándo parar, porque un error solo cuesta una consulta de más y los permisos los aplican las herramientas (RNF-01). Las **operaciones de escritura** son un flujo fijo (RF-25): modifican la base, así que la validación y la confirmación no pueden depender de que el modelo decida hacerlas. Reemplaza al ruteo fijo entre datos, documentos e híbrida de la v0.6. |
+| DC-11 | ¿Qué partes del agente deciden sus propios pasos? | Las **consultas de lectura** son agénticas (RF-24): el modelo elige herramientas, argumentos y cuándo parar, porque un error solo cuesta una consulta de más y los permisos los aplican las herramientas (RNF-01). En las **operaciones de escritura** (RF-25), el modelo decide cómo reunir los datos (con las mismas herramientas de lectura) y cuándo proponer la operación; la validación, la propuesta, la confirmación y la ejecución son un flujo fijo, porque modifican la base y no pueden depender de que el modelo decida hacerlas. La herramienta de escritura solo propone, y si el modelo no la invoca el sistema interpreta igual el pedido. Reemplaza al ruteo fijo entre datos, documentos e híbrida de la v0.6 y, desde la v0.9, a la escritura como flujo fijo completo de la v0.7. |
 | DC-10 | ¿Qué pasa si RNF-04 no se cumple con el plan gratuito de Gemini? | Se mantiene el objetivo y se documenta como **limitación conocida**. Medido en la corrida completa: mediana 11,5 s y p90 40,4 s; sin los casos en los que Gemini se colgó o devolvió 503, p90 24,9 s. La demora es de los modelos gratuitos, no del diseño del agente (DT-05 del spec técnico); con un modelo pago o más cuota, el objetivo es alcanzable sin cambios. |
 
 ---
@@ -418,6 +422,8 @@ El agente llega a esta ruta porque decide consultar las dos fuentes (RF-24); no 
 | 0.4 | 2026-10-03 | OP-03: la suspensión cancela las membresías activa, congelada y pendiente (decisión DT-03 del spec técnico). |
 | 0.5 | 2026-10-04 | Cierre. Se revisan los objetivos de métricas tras la evaluación (DC-01): se mantienen. DC-09: las 4 tablas de catálogo con menos de 15 registros quedan como riesgo aceptado (R-03). DC-10: RNF-04 no se cumple con el plan gratuito de Gemini y queda como limitación conocida. Se quita RF-77: el informe técnico no forma parte del SDD (la consigna lo pide solo para el agente). Por el mismo motivo, la interfaz gráfica sale del spec: se quitan RF-57 y RF-60 a RF-67 (§5.7 queda como nota de alcance), y RF-03, RF-46, RF-47, RF-51, RF-56 y los CA del §7.8 se redactan sobre la respuesta del agente en lugar de la pantalla. También salen el arranque, la infraestructura y la documentación (RNF-07, RNF-08) y las trazas (RF-70, RF-71, CA-85); §5.8 queda solo con la evaluación, y RF-49, S-07, DC-08, CA-01 y CA-43 dejan de apoyarse en las trazas. |
 | 0.7 | 2026-10-14 | Lectura agéntica y escritura como flujo fijo (DC-11). Se actualizan el objetivo (§1), el glosario (ruta, consulta de lectura, flujo de escritura) y §4.1. RF-14: el agente decide entre respuesta directa, consulta de lectura y escritura; en la lectura, la ruta sale de las fuentes que consultó. Nuevos RF-24 (consultas de lectura en pasos, con herramientas elegidas por el agente y un límite de pasos) y RF-25 (escritura con pasos fijos y sin herramientas de escritura durante la lectura). RNF-01, RNF-05 y RNF-06 se ajustan al límite de pasos. Nota en §7.4. Los criterios de aceptación y las métricas no cambian. |
+| 0.8 | 2026-10-15 | Cierre: RF-24 y RF-25 implementados y evaluados (tasks T-35 a T-40). Corrida completa del 15/10/2026 con 58 de 58 casos OK y todas las métricas del §5.8.1 en objetivo. Sin cambios de requisitos. Estado final. |
+| 0.9 | 2026-10-15 | Exploración del esquema y escritura iniciada por el agente (DC-11 revisada). RF-24: el agente puede explorar la estructura de la base (columnas de una tabla y valores de un campo) con los permisos del perfil; se agrega al glosario. RF-25: en un pedido de escritura el agente puede investigar con las herramientas de lectura y decide cuándo proponer la operación con una herramienta que solo propone; la validación, la propuesta, la confirmación y la ejecución siguen siendo pasos fijos, y si el agente no propone, el sistema interpreta igual el pedido. Se ajustan §1, el glosario, §4.1 y RNF-01. Nuevo CA-59 (suspensión de un socio identificado por su email). Las métricas no cambian. Implementado y evaluado (tasks T-41 a T-45): corrida completa del 15/10/2026 con 59 de 59 casos OK y todas las métricas del §5.8.1 en objetivo (`eval/resultados/2026-10-15_2053_6c06d31-dirty.md`). Estado final. |
 | 0.6 | 2026-10-04 | RF-10, RF-13 y RF-19: las citas (documento y sección) dejan de aparecer en el texto de la respuesta y quedan en su detalle; la línea de fuente indica "base de datos" y el nombre de cada documento citado, sin secciones. Se ajustan el glosario y CA-20 a CA-23. |
 
 ---

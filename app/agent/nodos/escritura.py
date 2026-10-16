@@ -1,8 +1,11 @@
-"""Ruta de escritura con confirmación (spec técnico §5.2, §5.5, §7; RF-40 a RF-49).
+"""Ruta de escritura con confirmación (spec técnico §5.2, §5.3, §5.5, §7; RF-25, RF-40 a RF-49).
 
-``extraer_operacion`` (LLM) → ``validar_operacion`` (código, herramienta ``operacion_socio``) →
-``confirmar`` (``interrupt()``: el grafo se pausa y la interfaz muestra la propuesta) →
-``ejecutar_operacion`` (código, transacción atómica) → ``responder_operacion`` (plantillas es/en).
+Después del ``agente`` (que reúne datos y propone con ``operacion_socio``, o termina sin proponer), los pasos
+son fijos (DT-10):
+
+``extraer_operacion`` (LLM: mensaje original + aclaraciones del agente) → ``validar_operacion`` (código,
+herramienta ``operacion_socio``) → ``confirmar`` (``interrupt()``: el grafo se pausa y la interfaz muestra la
+propuesta) → ``ejecutar_operacion`` (código, transacción atómica) → ``responder_operacion`` (plantillas es/en).
 
 La operación solo se ejecuta si el grafo se reanuda con ``{"decision": "confirmar"}``, lo que hace
 únicamente el botón **Confirmar** de la interfaz (RF-46). Escribir "sí" en el chat crea un hilo
@@ -14,13 +17,20 @@ from __future__ import annotations
 from langgraph.types import interrupt
 from langsmith import traceable
 
-from app.agent.estado import EstadoAgente
+from app.agent.estado import EstadoAgente, PasoAgente
 from app.agent.nodos import cargar_prompt, modelos
+from app.agent.nodos.agente import llamada_operacion
 from app.ops import auditoria
 from app.ops.ejecucion import ejecutar
 from app.ops.mensajes import texto_cancelada, texto_propuesta, texto_rechazo, texto_resultado
 from app.ops.modelos import ExtraccionOperacion, ResultadoValidacion
 from app.ops.validacion import validar
+
+
+def aclaraciones(estado: EstadoAgente) -> str:
+    """Aclaraciones de la llamada a ``operacion_socio`` del agente, o ``""`` si no la pidió (DT-10)."""
+    llamada = llamada_operacion(estado)
+    return str(((llamada or {}).get("args") or {}).get("aclaraciones") or "").strip()
 
 
 def armar_prompt(estado: EstadoAgente) -> str:
@@ -29,11 +39,12 @@ def armar_prompt(estado: EstadoAgente) -> str:
             .replace("<<fecha>>", estado["fecha_hoy"].strftime("%Y-%m-%d"))
             .replace("<<nombre>>", u.nombre)
             .replace("<<sede>>", u.sede_nombre or "ninguna (administración central: todas las sedes)")
+            .replace("<<aclaraciones>>", aclaraciones(estado) or "ninguno")
             .replace("<<mensaje>>", estado["mensaje"]))
 
 
 def extraer_operacion(estado: EstadoAgente) -> dict:
-    """Convierte el mensaje en una ``OperacionSocio`` con salida estructurada (§7.1)."""
+    """Convierte el mensaje (más las aclaraciones del agente) en una ``OperacionSocio`` (§7.1)."""
     extraccion: ExtraccionOperacion = modelos.invocar("principal", armar_prompt(estado), ExtraccionOperacion)
     return {"operacion": extraccion.operacion, "nodos": ["extraer_operacion"]}
 
@@ -51,8 +62,14 @@ def validar_operacion(estado: EstadoAgente) -> dict:
     if not r.valida:
         auditoria.registrar("rechazada", usuario, r.operacion, avisos=r.errores,
                             detalle=estado["mensaje"][:300], trace_id=estado.get("trace_id"))
-    return {"validacion": r, "propuesta": r.propuesta, "herramientas": ["operacion_socio"],
-            "nodos": ["validar_operacion"]}
+    salida = {"validacion": r, "propuesta": r.propuesta, "herramientas": ["operacion_socio"],
+              "nodos": ["validar_operacion"]}
+    if llamada_operacion(estado):  # el paso del agente, para el detalle de la respuesta
+        resumen = "propuesta lista para confirmar" if r.valida else \
+            "rechazada: " + ", ".join(a.codigo for a in r.errores)
+        salida["pasos"] = [PasoAgente(herramienta="operacion_socio",
+                                      argumentos={"aclaraciones": aclaraciones(estado)}, resumen=resumen)]
+    return salida
 
 
 def ruta_despues_de_validar(estado: EstadoAgente) -> str:

@@ -55,6 +55,7 @@ MENSAJE_LOGIN_INVALIDO = "No encontramos un usuario con esos datos."
 NOMBRES_RUTA = {
     "directa": "Respuesta directa", "fuera_dominio": "Fuera de dominio", "necesita_contexto": "Necesita contexto",
     "datos": "Consulta de datos", "documentos": "Consulta de documentos", "hibrida": "Consulta híbrida",
+    "lectura": "Consulta de lectura",
     "escritura": "Operación de escritura", "error": "Error",
 }
 
@@ -207,7 +208,22 @@ def mostrar_detalle(r: RespuestaAgente) -> None:
         st.markdown("**Herramientas invocadas:** " + (", ".join(f"`{h}`" for h in r.herramientas) or "ninguna"))
         if r.nodos:
             st.markdown("**Recorrido:** " + " → ".join(r.nodos))
-        if r.sql:  # solo perfil Administrador (RF-56, el filtro está en el agente)
+        pasos = getattr(r, "pasos", [])  # respuestas del historial creadas antes de agregar el campo
+        if pasos:
+            st.markdown("**Pasos del agente:**")
+            for i, p in enumerate(pasos, 1):
+                if p.herramienta != "consulta_sql":
+                    detalle = {"busqueda_documentos": p.argumentos.get("consulta", ""),
+                               "describir_tabla": p.argumentos.get("tabla", ""),
+                               "valores_columna": ".".join(filter(None, [p.argumentos.get("tabla"),
+                                                                         p.argumentos.get("columna")])),
+                               "operacion_socio": p.argumentos.get("aclaraciones", "")}.get(p.herramienta, "")
+                    st.markdown(f"{i}. `{p.herramienta}`" + (f" «{detalle}»" if detalle else "") + f" → {p.resumen}")
+                    continue
+                st.markdown(f"{i}. `consulta_sql` → {p.resumen}")
+                if p.argumentos.get("sql"):  # solo perfil Administrador (RF-56, el filtro está en el agente)
+                    st.code(p.argumentos["sql"], language="sql")
+        elif r.sql:
             st.markdown("**SQL ejecutada:**")
             st.code(r.sql, language="sql")
         citas = getattr(r, "citas", [])  # respuestas del historial creadas antes de agregar el campo

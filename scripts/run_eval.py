@@ -57,9 +57,10 @@ def cargar_casos(filtro: set[str] | None = None) -> list[dict]:
 
 
 def commit_actual() -> str:
+    """Commit corto de ``HEAD``, con ``-dirty`` si el código evaluado tiene cambios sin commitear."""
     try:
-        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=RAIZ, capture_output=True,
-                              text=True, timeout=10).stdout.strip() or "sin-commit"
+        return subprocess.run(["git", "describe", "--always", "--abbrev=7", "--dirty", "--exclude=*"], cwd=RAIZ,
+                              capture_output=True, text=True, timeout=10).stdout.strip() or "sin-commit"
     except Exception:  # noqa: BLE001
         return "sin-commit"
 
@@ -133,6 +134,8 @@ def ejecutar_caso(caso: dict) -> dict:
         "sql": r.sql,
         "filas": r.filas,
         "total_filas": r.total_filas,
+        "consultas": [c.model_dump(mode="json") for c in r.consultas],
+        "pasos": [p.model_dump(mode="json") for p in r.pasos],
         "fragmentos": [{"etiqueta": f.etiqueta, "texto": f.texto, "distancia": f.distancia} for f in r.fragmentos],
         "propuesta": ({"operacion": propuesta.operacion, "advertencias": [a.codigo for a in propuesta.advertencias],
                        "efectos": [e.codigo for e in propuesta.efectos]} if propuesta else None),
@@ -229,6 +232,34 @@ def _pct(v) -> str:
     return "—" if v is None else f"{v * 100:.1f} %"
 
 
+def _primer_mensaje(nodos: list[str]) -> list[str]:
+    """Recorrido del mensaje del caso, sin el de la reanudación (que repite el hilo desde ``clasificar``)."""
+    return nodos[:nodos.index("clasificar", 1)] if nodos.count("clasificar") > 1 else nodos
+
+
+def resumen_agente(evaluados: list[dict]) -> list[str]:
+    """Promedios del agente, separados en lectura y escritura (DT-08 del spec técnico)."""
+    lineas = []
+    for nombre, es_ruta in (("lectura", lambda n: "sintetizar" in n), ("escritura", lambda n: "extraer_operacion" in n)):
+        casos = [(_primer_mensaje(r["salida"].get("nodos") or []), r["salida"].get("pasos") or []) for r in evaluados]
+        casos = [(n, p) for n, p in casos if "agente" in n and es_ruta(n)]
+        if not casos:
+            lineas.append(f"- Agente en {nombre}: sin casos")
+            continue
+        rondas = statistics.mean(n.count("ejecutar_herramientas") for n, _ in casos)
+        llamadas = statistics.mean(n.count("agente") for n, _ in casos)
+        invocaciones = statistics.mean(sum(p["herramienta"] != "operacion_socio" for p in pasos) for _, pasos in casos)
+        maximo = max(n.count("ejecutar_herramientas") for n, _ in casos)
+        exploracion = sum(any(p["herramienta"] in ("describir_tabla", "valores_columna") for p in pasos)
+                          for _, pasos in casos)
+        extra = (f"; propuso con `operacion_socio` en {sum(any(p['herramienta'] == 'operacion_socio' for p in pasos) for _, pasos in casos)}"
+                 if nombre == "escritura" else "")
+        lineas.append(f"- Agente en {nombre} ({len(casos)} casos): {rondas:.2f} rondas de herramientas (máximo "
+                      f"{maximo}), {invocaciones:.2f} invocaciones de herramientas de lectura y {llamadas:.2f} "
+                      f"llamadas a `agente` por mensaje en promedio; exploró el esquema en {exploracion}{extra}")
+    return lineas
+
+
 def reporte(resultados: list[dict], resumen: dict, commit: str, inicio: datetime, experimento: str | None) -> str:
     s = get_settings()
     evaluados = [r for r in resultados if not r.get("omitido")]
@@ -245,6 +276,7 @@ def reporte(resultados: list[dict], resumen: dict, commit: str, inicio: datetime
         f"- Tiempo de respuesta: p90 {p90:.1f} s, mediana {statistics.median(tiempos):.1f} s (objetivo RNF-04: p90 < 15 s; sin las esperas del límite de RPM de la evaluación)"
         if tiempos else "- Tiempo de respuesta: —",
     ]
+    lineas += resumen_agente(evaluados)
     if experimento:
         lineas.append(f"- Experimento de LangSmith: `{experimento}`")
     lineas += ["", "## Métricas (§5.8.1 del spec funcional)", "",

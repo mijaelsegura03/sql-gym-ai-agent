@@ -11,7 +11,7 @@ import pytest
 from app.agent.estado import Clasificacion
 from app.agent.nodos import modelos
 from app.ops.modelos import AltaSocio, ContactoEmergencia, ExtraccionOperacion
-from tests.test_grafo_rutas import LLMFalso
+from tests.test_grafo_rutas import LLMFalso, fin, pide, sql
 
 pytestmark = [pytest.mark.db, pytest.mark.usefixtures("base_restaurada")]
 
@@ -64,25 +64,32 @@ def test_detalle_directa_sin_herramientas(at):
     assert "**Herramientas invocadas:** ninguna" in textos(at)  # CA-84
 
 
-def _clasif_datos():
-    return Clasificacion(ruta="datos", idioma="es", pide_info_interna=False, pregunta_datos="socios por sede")
+def _clasif_lectura():
+    return Clasificacion(ruta="lectura", idioma="es", pide_info_interna=False)
+
+
+def _agente_sedes():
+    """Agente de lectura simulado: consulta las sedes y termina."""
+    return LLMFalso(pasos=[pide(sql("SELECT nombre FROM sede ORDER BY id")), fin()], textos=["Hay 3 sedes."])
 
 
 def test_detalle_admin_muestra_sql(at):
-    modelos.rapido = LLMFalso(estructurado={"Clasificacion": _clasif_datos()})
-    modelos.principal = LLMFalso(textos=["```sql\nSELECT nombre FROM sede ORDER BY id\n```", "Hay 3 sedes."])
+    modelos.rapido = LLMFalso(estructurado={"Clasificacion": _clasif_lectura()})
+    modelos.principal = _agente_sedes()
     ingresar(at, "Administrador", ADMIN_NORTE)
     at.chat_input[0].set_value("¿Qué sedes hay?").run()
     assert any("SELECT nombre FROM sede" in c.value for c in at.code)  # CA-82
+    assert "Consulta de datos" in textos(at) and "**Pasos del agente:**" in textos(at)
     assert at.dataframe  # tabla (RF-03)
 
 
 def test_detalle_socio_sin_sql(at):
-    modelos.rapido = LLMFalso(estructurado={"Clasificacion": _clasif_datos()})
-    modelos.principal = LLMFalso(textos=["```sql\nSELECT nombre FROM sede ORDER BY id\n```", "Hay 3 sedes."])
+    modelos.rapido = LLMFalso(estructurado={"Clasificacion": _clasif_lectura()})
+    modelos.principal = _agente_sedes()
     ingresar(at, "Socio", "21899127")
     at.chat_input[0].set_value("¿Qué sedes hay?").run()
     assert not at.code and "Consulta de datos" in textos(at)  # CA-83
+    assert "`consulta_sql` → 3 filas" in textos(at)  # el paso se ve, la SQL no
 
 
 def _alta_falsa():

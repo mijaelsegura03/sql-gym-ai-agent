@@ -1,21 +1,24 @@
 # sql-gym-ai-agent
 
 Agente de IA para un gimnasio con tres sedes (Centro, Norte y Sur). Recibe mensajes en lenguaje natural
-(castellano o inglés) y decide si responde directamente, si consulta la **base de datos** (text-to-SQL), los
-**documentos de políticas** (RAG sobre 4 PDFs) o ambos, y, para un administrador, ejecuta **operaciones de
-gestión de socios** siempre con confirmación previa. Respeta en todo momento lo que cada perfil puede ver y hacer.
+(castellano o inglés) y decide si responde directamente, si es una consulta de lectura o una operación de
+escritura. Un **agente ReAct** decide paso a paso si consulta la **base de datos** (text-to-SQL, con herramientas
+para explorar el esquema), los **documentos de políticas** (RAG sobre 4 PDFs) o ambos, con qué consulta y cuándo
+tiene información suficiente. Para un administrador, el mismo agente prepara las **operaciones de gestión de
+socios** (por ejemplo, busca al socio por su email) y las propone; desde la propuesta, la validación, la
+confirmación y la ejecución son un **flujo fijo**. Respeta en todo momento lo que cada perfil puede ver y hacer.
 
 Trabajo práctico integrador de AI Engineering (UCSE, 2026). Se desarrolló con **Spec Driven Development**:
 los artefactos están en [`sdd/`](sdd/) (spec funcional, spec técnico y `tasks.json`).
 
 | Componente | Tecnología |
 |---|---|
-| Agente | LangGraph (grafo con ruteo, fan-out en paralelo e `interrupt()` para confirmar) |
+| Agente | LangGraph: agente ReAct con *tool calling* para la lectura y la preparación de la escritura, y flujo fijo con `interrupt()` para confirmarla |
 | LLM y embeddings | Google Gemini (plan gratuito): modelo rápido, modelo principal y `gemini-embedding-001` |
 | Base relacional | PostgreSQL 16 en Docker, con roles de solo lectura, vistas filtradas por socio y auditoría |
 | RAG | PyMuPDF (con tablas a Markdown) + Chroma embebida |
 | Interfaz | Streamlit |
-| Observabilidad y evaluación | LangSmith (trazas y experimentos) + conjunto de 58 casos versionado |
+| Observabilidad y evaluación | LangSmith (trazas y experimentos) + conjunto de 59 casos versionado |
 
 ---
 
@@ -90,10 +93,40 @@ los empleados inactivos no tienen acceso.
   "Con mi apto médico, ¿qué clases me recomiendan?".
 - **Escritura** (solo administrador, con propuesta y botón **Confirmar**): alta, modificación de datos,
   suspensión, reactivación y baja de un socio, por ejemplo
-  "Suspendé al socio con DNI 27579048 por trato irrespetuoso al personal".
+  "Suspendé al socio con DNI 27579048 por trato irrespetuoso al personal" o, sin el DNI, "Suspendé al socio con
+  email ezequiel.ramirez5@example.com por prestar su QR a un tercero" (el agente lo busca en la base).
 
-Cada respuesta tiene un desplegable **Detalle** con la ruta, las herramientas invocadas, la SQL ejecutada
+En las consultas de lectura, la ruta (datos, documentos o híbrida) sale de las herramientas que el agente
+decidió usar. Cada respuesta tiene un desplegable **Detalle** con la ruta, las herramientas invocadas, los
+**pasos del agente** (cada consulta a la base o búsqueda en los documentos, con su resultado), la SQL ejecutada
 (solo administrador) y los fragmentos de documentos citados.
+
+### Cómo trabaja el agente
+
+```
+clasificar ─┬─ directa / fuera de dominio ─────────────▶ respuesta (1 llamada al LLM, sin herramientas)
+            ├─ socio que pide escribir o datos ajenos ─▶ rechazo (en código)
+            ├─ lectura ──────────┬─▶ agente ⇄ ejecutar_herramientas   (hasta 4 rondas)
+            └─ escritura (admin) ┘     │  consulta_sql, busqueda_documentos,
+                                       │  describir_tabla, valores_columna
+                                       ├─ lectura ─▶ sintetizar
+                                       └─ escritura: operacion_socio (solo propone)
+                                            ─▶ extraer ─▶ validar ─▶ confirmar (botón) ─▶ ejecutar
+```
+
+- **Lectura (agente):** el modelo principal, con `bind_tools`, elige la herramienta, escribe la SQL o la búsqueda
+  y decide cuándo parar. Puede encadenar (consultar un dato y buscar la regla que corresponde), corregir una SQL
+  que falló y combinar las dos fuentes. Si duda de una columna o de un valor, puede explorar el esquema
+  (`describir_tabla`, `valores_columna`). La respuesta final la redacta `sintetizar`, que arma las citas y las
+  fuentes en código.
+- **Escritura (agente + workflow):** el agente puede buscar en la base lo que el pedido no dice directamente (por
+  ejemplo, el DNI de un socio a partir de su email) y propone con `operacion_socio`, que no ejecuta nada. Desde ahí
+  los pasos son fijos: la operación se arma desde el mensaje original, se valida en código y solo se ejecuta con
+  el botón **Confirmar**. Si el agente no propone, el pedido pasa igual por la validación. En una lectura, y con
+  perfil socio siempre, el agente no tiene ninguna herramienta de escritura.
+- **Permisos:** las herramientas reciben el usuario de la sesión, nunca del modelo; la SQL pasa por el validador,
+  el rol de solo lectura y la transacción `READ ONLY`, y la exploración del esquema solo muestra las tablas y las
+  filas que el perfil puede leer.
 
 ## 4. Tests
 
@@ -138,10 +171,10 @@ app/
   config.py            Configuración (.env) con pydantic-settings
   auth.py              Identificación por DNI y seudónimo para las trazas
   llm.py               Modelos de Gemini con reintentos ante el error 429
-  db/                  Conexiones por rol, validación (sqlglot) y ejecución de SQL de lectura, catálogos del esquema
+  db/                  Conexiones por rol, validación (sqlglot) y ejecución de SQL de lectura, exploración del esquema, catálogos
   rag/                 Ingesta de PDFs (secciones, tablas a Markdown) y búsqueda en Chroma
   ops/                 Operaciones de escritura: modelos, validaciones de negocio, ejecución atómica, auditoría, mensajes
-  agent/               Grafo LangGraph, nodos y prompts versionados (.md)
+  agent/               Grafo LangGraph, herramientas del agente, nodos y prompts versionados (.md)
   ui/app.py            Interfaz Streamlit
 data/
   gimnasio_schema.sql  Esquema (17 tablas)
